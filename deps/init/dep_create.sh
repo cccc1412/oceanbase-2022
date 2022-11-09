@@ -105,7 +105,8 @@ function get_os_release() {
       ;;
     esac
   fi
-  not_supported && return 1 
+  version_ge "16.04" && compat_centos7 && return
+  #not_supported && return 1 
 }
 
 get_os_release || exit 1

@@ -66,9 +66,6 @@ if (OB_USE_CCACHE)
 endif()
 
 if (OB_USE_CLANG)
-    find_program(OB_CCACHE ccache
-            "${DEVTOOLS_DIR}/bin"
-            NO_DEFAULT_PATH)
   find_program(OB_CC clang
   "${DEVTOOLS_DIR}/bin"
     NO_DEFAULT_PATH)
@@ -98,12 +95,6 @@ if (OB_USE_CLANG)
   set(CMAKE_EXE_LINKER_FLAGS "${LD_OPT} -Wl,-z,noexecstack ${REORDER_LINK_OPT}")
 else() # not clang, use gcc
   message("gcc9 not support currently, please set OB_USE_CLANG ON and we will finish it as soon as possible")
-endif()
-
-if(OB_CCACHE)
-    message("set c and cxx launcher ${OB_CCACHE}")
-    set(CMAKE_C_COMPILER_LAUNCHER ${OB_CCACHE})
-    set(CMAKE_CXX_COMPILER_LAUNCHER ${OB_CCACHE})
 endif()
 
 if (OB_CC AND OB_CXX)

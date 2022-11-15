@@ -15,9 +15,11 @@
 #include "sql/engine/cmd/ob_load_data_executor.h"
 
 #include "lib/oblog/ob_log_module.h"
-#include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/cmd/ob_load_data_direct_demo.h"
+#include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/ob_exec_context.h"
+#include <stdlib.h>
+#include "ob_load_data_direct_task.h"
 
 namespace oceanbase
 {
@@ -26,19 +28,31 @@ namespace sql
 int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt)
 {
   int ret = OB_SUCCESS;
-  ObLoadDataBase *load_impl = NULL;
   if (!stmt.get_load_arguments().is_csv_format_) {
     ret = OB_NOT_SUPPORTED;
     LOG_WARN("invalid resolver results", K(ret));
-  // } else if (OB_ISNULL(load_impl = OB_NEWx(ObLoadDataSPImpl, (&ctx.get_allocator())))) {
-  } else if (OB_ISNULL(load_impl = OB_NEWx(ObLoadDataDirectDemo, (&ctx.get_allocator())))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
-    LOG_WARN("allocate memory failed", K(ret));
+    return ret;
+  }
+
+  share::ObAsyncTaskQueue async_tq;
+  async_tq.init(1, 1 << 10, "ObLoadDataExecutor");
+
+  struct stat st;
+  if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
+    return OB_FILE_NOT_OPENED;
   } else {
-    if (OB_FAIL(load_impl->execute(ctx, stmt))) {
-      LOG_WARN("failed to execute load data stmt", K(ret));
+    off64_t size = st.st_size;
+    int64_t offset = 0;
+    while (offset < size) {
+      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE);
+      async_tq.push(ObLDDT);
+      offset += FILE_SPILT_SIZE;
     }
-    load_impl->~ObLoadDataBase();
+    if (OB_FAIL(async_tq.start())) {
+      LOG_WARN("cannot start async_tq", K(ret));
+    } else {
+      async_tq.wait();
+    }
   }
   return ret;
 }

@@ -45,9 +45,11 @@ public:
   ~ObLoadSequentialFileReader();
   int open(const ObString &filepath);
   int read_next_buffer(ObLoadDataBuffer &buffer);
+  void set_offset_end(int64_t offset,int64_t end) {offset_=offset; end_=end;};
 private:
   common::ObFileReader file_reader_;
   int64_t offset_;
+  int64_t end_;
   bool is_read_end_;
 };
 
@@ -197,6 +199,7 @@ public:
   ObLoadDataDirectDemo();
   virtual ~ObLoadDataDirectDemo();
   int execute(ObExecContext &ctx, ObLoadDataStmt &load_stmt) override;
+  int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end);
 private:
   int inner_init(ObLoadDataStmt &load_stmt);
   int do_load();

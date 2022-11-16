@@ -10,7 +10,7 @@
  * Mulan PubL v2 for more details.
  */
 
-#include "lib/thread/ob_work_queue.h"
+#include "lib/thread/ob_async_task_queue.h"
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/cmd/ob_load_data_executor.h"
@@ -32,8 +32,8 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     return ret;
   }
 
-  common::ObWorkQueue wq;
-  wq.init(1, 1 << 10, "ObLoadDataExecutor");
+  share::ObAsyncTaskQueue aysnc_tq;
+  aysnc_tq.init(1, 1 << 10, "ObLoadDataExecutor");
 
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
@@ -43,13 +43,13 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     int64_t offset = 0;
     while (offset < size) {
       ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE);
-      wq.add_async_task(ObLDDT);
+      aysnc_tq.push(ObLDDT);
       offset += FILE_SPILT_SIZE;
     }
-    if (OB_FAIL(wq.start())) {
+    if (OB_FAIL(aysnc_tq.start())) {
       LOG_WARN("cannot start async_tq", K(ret));
     } else {
-      wq.wait();
+      aysnc_tq.wait();
     }
   }
   

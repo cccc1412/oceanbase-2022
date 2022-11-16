@@ -12,7 +12,7 @@ namespace oceanbase
 {
 namespace sql
 {
-
+#define MAX_RECORD_SIZE 1024L*1024L
 class ObLoadDataBuffer
 {
 public:
@@ -45,7 +45,7 @@ public:
   ~ObLoadSequentialFileReader();
   int open(const ObString &filepath);
   int read_next_buffer(ObLoadDataBuffer &buffer);
-  void set_offset_end(int64_t offset,int64_t end) {offset_=offset; end_=end;};
+  int set_offset_end(int64_t offset, int64_t end);
 private:
   common::ObFileReader file_reader_;
   int64_t offset_;

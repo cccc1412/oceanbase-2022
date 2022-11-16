@@ -1,32 +1,30 @@
 /**
  * Copyright (c) 2021 OceanBase
  * OceanBase CE is licensed under Mulan PubL v2.
- * You can use this software according to the terms and conditions of the Mulan PubL v2.
- * You may obtain a copy of Mulan PubL v2 at:
+ * You can use this software according to the terms and conditions of the Mulan
+ * PubL v2. You may obtain a copy of Mulan PubL v2 at:
  *          http://license.coscl.org.cn/MulanPubL-2.0
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PubL v2 for more details.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY
+ * KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+ * NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE. See the
+ * Mulan PubL v2 for more details.
  */
 
-#define USING_LOG_PREFIX  SQL_ENG
+#include "lib/thread/ob_work_queue.h"
+#define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/cmd/ob_load_data_executor.h"
 
 #include "lib/oblog/ob_log_module.h"
+#include "ob_load_data_direct_task.h"
 #include "sql/engine/cmd/ob_load_data_direct_demo.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/ob_exec_context.h"
 #include <stdlib.h>
-#include "ob_load_data_direct_task.h"
 
-namespace oceanbase
-{
-namespace sql
-{
-int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt)
-{
+namespace oceanbase {
+namespace sql {
+int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   int ret = OB_SUCCESS;
   if (!stmt.get_load_arguments().is_csv_format_) {
     ret = OB_NOT_SUPPORTED;
@@ -34,8 +32,8 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt)
     return ret;
   }
 
-  share::ObAsyncTaskQueue async_tq;
-  async_tq.init(1, 1 << 10, "ObLoadDataExecutor");
+  common::ObWorkQueue wq;
+  wq.init(1, 1 << 10, "ObLoadDataExecutor");
 
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
@@ -45,17 +43,18 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt)
     int64_t offset = 0;
     while (offset < size) {
       ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE);
-      async_tq.push(ObLDDT);
+      wq.add_async_task(ObLDDT);
       offset += FILE_SPILT_SIZE;
     }
-    if (OB_FAIL(async_tq.start())) {
+    if (OB_FAIL(wq.start())) {
       LOG_WARN("cannot start async_tq", K(ret));
     } else {
-      async_tq.wait();
+      wq.wait();
     }
   }
+  
   return ret;
 }
 
-} // sql
-} // oceanbase
+} // namespace sql
+} // namespace oceanbase

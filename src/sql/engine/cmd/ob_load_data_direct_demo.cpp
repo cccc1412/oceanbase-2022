@@ -93,6 +93,47 @@ int ObLoadSequentialFileReader::open(const ObString &filepath) {
   return ret;
 }
 
+int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
+  int ret = OB_SUCCESS;
+  char *buf = (char *)malloc(MAX_RECORD_SIZE);
+
+  int64_t read_size = 0;
+  memset(buf, 0, MAX_RECORD_SIZE);
+  if (OB_FAIL(file_reader_.pread(buf, MAX_RECORD_SIZE, end, read_size))) {
+    LOG_WARN("fail to do pread", KR(ret));
+    goto out;
+  } else {
+    int64_t i = 0;
+    while (i < read_size && buf[i] != '\n') {
+      i++;
+      end++;
+    }
+    end++;
+  }
+
+  if (offset != 0) {
+    read_size = 0;
+    memset(buf, 0, MAX_RECORD_SIZE);
+    if (OB_FAIL(file_reader_.pread(buf, MAX_RECORD_SIZE, offset, read_size))) {
+      LOG_WARN("fail to do pread", KR(ret));
+      goto out;
+    } else {
+      int64_t i = 0;
+      while (i < read_size && buf[i] != '\n') {
+        i++;
+        offset++;
+      }
+      offset++;
+    }
+  }
+
+  offset_ = offset;
+  end_ = end;
+out:
+  free(buf);
+  return ret;
+}
+
 int ObLoadSequentialFileReader::read_next_buffer(ObLoadDataBuffer &buffer) {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(!file_reader_.is_opened())) {
@@ -102,7 +143,7 @@ int ObLoadSequentialFileReader::read_next_buffer(ObLoadDataBuffer &buffer) {
     ret = OB_ITER_END;
   } else if (OB_LIKELY(buffer.get_remain_size() > 0)) {
     const int64_t buffer_remain_size = buffer.get_remain_size();
-    const int64_t read_size_=min(buffer_remain_size, end_-offset_);
+    const int64_t read_size_ = min(buffer_remain_size, end_ - offset_);
     int64_t read_size = 0;
     if (OB_FAIL(
             file_reader_.pread(buffer.end(), read_size_, offset_, read_size))) {
@@ -893,12 +934,13 @@ int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
   return ret;
 }
 
-int ObLoadDataDirectDemo::init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end) {
+int ObLoadDataDirectDemo::init(ObLoadDataStmt &load_stmt, int64_t offset,
+                               int64_t end) {
   int ret = OB_SUCCESS;
   if (OB_FAIL(inner_init(load_stmt))) {
     LOG_WARN("fail to init ObLoadDataDirectDemo", KR(ret));
   } else {
-    file_reader_.set_offset_end(offset,end);
+    ret = file_reader_.set_offset_end(offset, end);
   }
   return ret;
 }

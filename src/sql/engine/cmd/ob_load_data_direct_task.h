@@ -11,10 +11,10 @@ namespace sql {
 
 class ObLoadDataDirectTask : public share::ObAsyncTask {
 public:
-  ObLoadDataDirectTask(ObExecContext &ctx, ObLoadDataStmt &stmt, int64_t offset, int64_t end,
+  ObLoadDataDirectTask(ObExecContext &ctx, ObLoadDataStmt &stmt, int64_t offset, int64_t end, share::ObTenantBase *obt,
                        ObLoadDataDirectDemo *load_direct=nullptr)
       : ctx_(ctx), stmt_(stmt), offset_(offset),
-        end_(end),load_direct_(load_direct){};
+        end_(end), obt_(obt), load_direct_(load_direct){};
   virtual int process() override;
   virtual int64_t get_deep_copy_size() const override {return sizeof(*this);};
   virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override;
@@ -24,6 +24,7 @@ private:
   ObLoadDataStmt &stmt_;
   int64_t offset_;
   int64_t end_;
+  share::ObTenantBase *obt_;
   ObLoadDataDirectDemo *load_direct_ = nullptr;
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataDirectTask);
 };

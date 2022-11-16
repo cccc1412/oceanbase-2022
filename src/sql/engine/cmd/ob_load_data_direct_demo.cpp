@@ -635,7 +635,7 @@ ObLoadSSTableWriter::ObLoadSSTableWriter()
 
 ObLoadSSTableWriter::~ObLoadSSTableWriter() {}
 
-int ObLoadSSTableWriter::init(const ObTableSchema *table_schema) {
+int ObLoadSSTableWriter::init(const ObTableSchema *table_schema, int tenant_id) {
   int ret = OB_SUCCESS;
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
@@ -656,7 +656,7 @@ int ObLoadSSTableWriter::init(const ObTableSchema *table_schema) {
     if (OB_ISNULL(location_service = GCTX.location_service_)) {
       ret = OB_ERR_SYS;
       LOG_WARN("location service is null", KR(ret), KP(location_service));
-    } else if (OB_FAIL(location_service->get(MTL_ID(), tablet_id_, INT64_MAX,
+    } else if (OB_FAIL(location_service->get(tenant_id, tablet_id_, INT64_MAX,
                                              is_cache_hit, ls_id_))) {
       LOG_WARN("fail to get ls id", KR(ret), K(tablet_id_));
     } else if (OB_ISNULL(ls_service = MTL(ObLSService *))) {
@@ -952,7 +952,7 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init sstable_writer_
-  else if (OB_FAIL(sstable_writer_.init(table_schema))) {
+  else if (OB_FAIL(sstable_writer_.init(table_schema, tenant_id))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
   return ret;

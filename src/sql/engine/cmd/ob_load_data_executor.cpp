@@ -10,6 +10,7 @@
  * See the Mulan PubL v2 for more details.
  */
 
+#include "share/rc/ob_tenant_base.h"
 #define USING_LOG_PREFIX  SQL_ENG
 
 #include "sql/engine/cmd/ob_load_data_executor.h"
@@ -44,7 +45,8 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt)
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
-      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE);
+      share::ObTenantBase *obt = MTL_CTX();
+      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE, obt);
       async_tq.push(ObLDDT);
       offset += FILE_SPILT_SIZE;
     }

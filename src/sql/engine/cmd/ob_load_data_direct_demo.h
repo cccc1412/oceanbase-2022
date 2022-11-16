@@ -167,7 +167,7 @@ class ObLoadSSTableWriter
 public:
   ObLoadSSTableWriter();
   ~ObLoadSSTableWriter();
-  int init(const share::schema::ObTableSchema *table_schema);
+  int init(const share::schema::ObTableSchema *table_schema, int tenant_id);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
 private:

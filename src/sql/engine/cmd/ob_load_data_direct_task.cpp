@@ -17,13 +17,14 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
   if (NULL == buf || buf_size < (sizeof(*task))) {
     LOG_WARN("invalid argument", KP(buf), K(buf_size));
   } else {
-    task = new (buf) ObLoadDataDirectTask(ctx_, stmt_, offset_,end_,load_direct_);
+    task = new (buf) ObLoadDataDirectTask(ctx_, stmt_, offset_,end_, obt_, load_direct_);
   }
   return task;
 }
 
 int ObLoadDataDirectTask::process() {
   int ret = OB_SUCCESS;
+  share::ObTenantEnv::set_tenant(obt_);
   if (OB_FAIL(prepare())) {
     LOG_WARN("prepare error", K(ret));
   } else{

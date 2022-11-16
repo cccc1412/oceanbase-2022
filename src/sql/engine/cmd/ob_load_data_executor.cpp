@@ -10,8 +10,9 @@
  * Mulan PubL v2 for more details.
  */
 
-#include "lib/thread/ob_async_task_queue.h"
 #define USING_LOG_PREFIX SQL_ENG
+#include "lib/thread/ob_async_task_queue.h"
+#include "share/rc/ob_tenant_base.h"
 
 #include "sql/engine/cmd/ob_load_data_executor.h"
 
@@ -32,8 +33,8 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     return ret;
   }
 
-  share::ObAsyncTaskQueue aysnc_tq;
-  aysnc_tq.init(1, 1 << 10, "ObLoadDataExecutor");
+  share::ObAsyncTaskQueue async_tq;
+  async_tq.init(1, 1 << 10, "ObLoadDataExecutor");
 
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
@@ -42,14 +43,15 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
-      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE);
-      aysnc_tq.push(ObLDDT);
+      share::ObTenantBase *obt = MTL_CTX();
+      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE, obt);
+      async_tq.push(ObLDDT);
       offset += FILE_SPILT_SIZE;
     }
-    if (OB_FAIL(aysnc_tq.start())) {
+    if (OB_FAIL(async_tq.start())) {
       LOG_WARN("cannot start async_tq", K(ret));
     } else {
-      aysnc_tq.wait();
+      async_tq.wait();
     }
   }
   

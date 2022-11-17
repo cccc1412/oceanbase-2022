@@ -19,7 +19,7 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t FILE_SPILT_SIZE = 1L * 1024L * 1024L * 1024L;
+  static const int64_t FILE_SPILT_SIZE = 1L * 1024L * 1024L * 256L;
 public:
   ObLoadDataExecutor() {}
   virtual ~ObLoadDataExecutor() {}

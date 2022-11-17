@@ -35,7 +35,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   }
 
   ObLoadDataDirectTaskQueue* async_tq = new ObLoadDataDirectTaskQueue;
-  async_tq->init(2, 1 << 10, "ObLoadDataExecutor");
+  async_tq->init(1, 1 << 10, "ObLoadDataExecutor");
   async_tq->start();
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
@@ -45,7 +45,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     int64_t offset = 0;
     while (offset < size) {
       share::ObTenantBase *obt = MTL_CTX();
-      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset + 20, obt);
+      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset + FILE_SPILT_SIZE, obt);
       if(OB_FAIL(ret = async_tq->push_task(ObLDDT))){
         LOG_WARN("cannot push task");
         return ret;

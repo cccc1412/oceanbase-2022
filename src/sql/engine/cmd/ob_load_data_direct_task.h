@@ -16,7 +16,7 @@ public:
       : ctx_(ctx), stmt_(stmt), offset_(offset),
         end_(end), obt_(obt), load_direct_(load_direct){};
   virtual int process() override;
-  virtual int64_t get_deep_copy_size() const override {return sizeof(*this);};
+  virtual int64_t get_deep_copy_size() const override {return sizeof(ObLoadDataDirectTask);};
   virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override;
 private:
   int prepare();

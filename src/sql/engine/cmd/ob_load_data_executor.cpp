@@ -21,6 +21,7 @@
 #include "sql/engine/cmd/ob_load_data_direct_demo.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/ob_exec_context.h"
+#include "sql/engine/cmd/ob_load_data_direct_task_queue.h"
 #include <stdlib.h>
 
 namespace oceanbase {
@@ -33,26 +34,29 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     return ret;
   }
 
-  share::ObAsyncTaskQueue async_tq;
-  async_tq.init(1, 1 << 10, "ObLoadDataExecutor");
-
+  ObLoadDataDirectTaskQueue* async_tq = new ObLoadDataDirectTaskQueue;
+  async_tq->init(2, 1 << 10, "ObLoadDataExecutor");
+  async_tq->start();
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
-    return OB_FILE_NOT_OPENED;
+   return OB_FILE_NOT_OPENED;
   } else {
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
       share::ObTenantBase *obt = MTL_CTX();
-      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset+FILE_SPILT_SIZE, obt);
-      async_tq.push(ObLDDT);
+      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset + 20, obt);
+      if(OB_FAIL(ret = async_tq->push(ObLDDT))){
+        LOG_WARN("cannot push task");
+        return ret;
+      };
       offset += FILE_SPILT_SIZE;
     }
-    if (OB_FAIL(async_tq.start())) {
-      LOG_WARN("cannot start async_tq", K(ret));
-    } else {
-      async_tq.wait();
-    }
+    //if (OB_FAIL(ret = async_tq->start())) {
+    //  LOG_WARN("cannot start async_tq", K(ret));
+    //} else {
+      async_tq->wait();
+    //}
   }
   
   return ret;

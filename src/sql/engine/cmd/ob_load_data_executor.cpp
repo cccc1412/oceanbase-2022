@@ -46,7 +46,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     while (offset < size) {
       share::ObTenantBase *obt = MTL_CTX();
       ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset + 20, obt);
-      if(OB_FAIL(ret = async_tq->push(ObLDDT))){
+      if(OB_FAIL(ret = async_tq->push_task(ObLDDT))){
         LOG_WARN("cannot push task");
         return ret;
       };
@@ -55,7 +55,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     //if (OB_FAIL(ret = async_tq->start())) {
     //  LOG_WARN("cannot start async_tq", K(ret));
     //} else {
-      async_tq->wait();
+      async_tq->wait_all_task();
     //}
   }
   

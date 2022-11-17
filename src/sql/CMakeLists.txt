@@ -178,6 +178,7 @@ ob_set_subtarget(ob_sql engine_cmd
   engine/cmd/ob_kill_session_arg.cpp
   engine/cmd/ob_load_data_direct_demo.cpp
   engine/cmd/ob_load_data_direct_task.cpp
+  engine/cmd/ob_load_data_direct_task_queue.cpp
   engine/cmd/ob_load_data_executor.cpp
   engine/cmd/ob_load_data_impl.cpp
   engine/cmd/ob_load_data_parser.cpp

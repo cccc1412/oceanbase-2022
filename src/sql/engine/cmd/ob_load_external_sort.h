@@ -52,6 +52,7 @@ private:
   int64_t merge_count_;
   int64_t file_buf_size_;
   static FragmentIteratorList iters_;
+  static common::ObSpinLock iters_lock_;
   FragmentWriter writer_;
   int64_t expire_timestamp_;
   Compare *compare_;
@@ -65,6 +66,8 @@ private:
 
 template<typename T, typename Compare>
 common::ObArray<ObFragmentIterator<T> *> MyExternalSortRound<T,Compare>::iters_;
+template<typename T, typename Compare>
+common::ObSpinLock MyExternalSortRound<T,Compare>::iters_lock_;
 
 template<typename T, typename Compare>
 MyExternalSortRound<T, Compare>::MyExternalSortRound()
@@ -157,11 +160,16 @@ int MyExternalSortRound<T, Compare>::build_fragment()
         writer_.get_sample_item(), file_buf_size_))) {
       STORAGE_LOG(WARN, "fail to open reader", K(ret), K(file_buf_size_),
           K(expire_timestamp_));
-    } else if (OB_FAIL(iters_.push_back(reader))) {
-      STORAGE_LOG(WARN, "fail to push back reader", K(ret));
     } else {
-      writer_.reset();
-      is_writer_opened_ = false;
+      iters_lock_.lock();
+      if(OB_FAIL(iters_.push_back(reader))) {
+        iters_lock_.unlock();
+        STORAGE_LOG(WARN, "fail to push back reader", K(ret));
+      } else {
+        iters_lock_.unlock();
+        writer_.reset();
+        is_writer_opened_ = false;
+      }
     }
   }
   return ret;

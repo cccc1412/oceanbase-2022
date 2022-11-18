@@ -38,7 +38,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   ObLoadSSTableWriter sstable_writer;
   ObLoadDataDirectTaskQueue async_tq;
   share::ObTenantBase *obt = MTL_CTX();
-  async_tq.init(3, 1 << 10, "ObLoadDataExe");
+  async_tq.init(10, 1 << 10, "ObLoadDataExe");
   if (OB_FAIL(ret = async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));
     return ret;

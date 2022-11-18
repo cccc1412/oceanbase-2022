@@ -57,8 +57,25 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     //} else {
       async_tq->wait_all_task();
     //}
+    ObLoadDataDirectDemo::processed=true;
+    if (OB_FAIL(ObLoadDataDirectDemo::close_sort())) {
+      LOG_WARN("cannot close sort", K(ret));
+    } else {
+      for (int i = 0; i < IO_THREAD_NUM; i++) {
+        share::ObTenantBase *obt = MTL_CTX();
+        ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0,
+                                    obt);
+        if (OB_FAIL(ret = async_tq->push_task(ObLDDT))) {
+          LOG_WARN("cannot push task");
+          return ret;
+        };
+      }
+      async_tq->wait_all_task();
+      if (OB_FAIL(ObLoadDataDirectDemo::close_sstable())) {
+        LOG_WARN("cannot close sstable", K(ret));
+      }
+    }
   }
-  
   return ret;
 }
 

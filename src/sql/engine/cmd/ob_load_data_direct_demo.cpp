@@ -1,6 +1,5 @@
 
 
-
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/cmd/ob_load_data_direct_demo.h"
@@ -18,6 +17,10 @@ using namespace lib;
 using namespace observer;
 using namespace share;
 using namespace share::schema;
+
+ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
+ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;
+bool ObLoadDataDirectDemo::processed = false;
 
 /**
  * ObLoadDataBuffer
@@ -348,7 +351,7 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
     if (OB_UNLIKELY(count <= 0)) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("unexpected count", K(count));
-    } else if (count > capacity_ && OB_FAIL(init(count))) { //todo cmz
+    } else if (count > capacity_ && OB_FAIL(init(count))) { // todo cmz
       LOG_WARN("fail to init", KR(ret));
     } else {
       OB_UNIS_DECODE_ARRAY(datums_, count);
@@ -438,7 +441,8 @@ ObLoadRowCaster::~ObLoadRowCaster() {}
 
 int ObLoadRowCaster::init(
     const ObTableSchema *table_schema,
-    const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list, int tenant_id) {
+    const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list,
+    int tenant_id) {
   int ret = OB_SUCCESS;
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
@@ -453,7 +457,8 @@ int ObLoadRowCaster::init(
   } else if (OB_FAIL(init_column_schemas_and_idxs(table_schema,
                                                   field_or_var_list))) {
     LOG_WARN("fail to init column schemas and idxs", KR(ret));
-  } else if (OB_FAIL(datum_row_.init(table_schema->get_column_count(), tenant_id))) {
+  } else if (OB_FAIL(datum_row_.init(table_schema->get_column_count(),
+                                     tenant_id))) {
     LOG_WARN("fail to init datum row", KR(ret));
   } else {
     column_count_ = table_schema->get_column_count();
@@ -591,8 +596,13 @@ ObLoadExternalSort::ObLoadExternalSort()
 ObLoadExternalSort::~ObLoadExternalSort() { external_sort_.clean_up(); }
 
 int ObLoadExternalSort::init(const ObTableSchema *table_schema,
-                             int64_t mem_size, int64_t file_buf_size, int tenant_id) {
+                             int64_t mem_size, int64_t file_buf_size,
+                             int tenant_id) {
   int ret = OB_SUCCESS;
+  lock_.lock();
+  if (IS_INIT) {
+    goto out;
+  }
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
     LOG_WARN("ObLoadExternalSort init twice", KR(ret), KP(this));
@@ -619,11 +629,14 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema,
       is_inited_ = true;
     }
   }
+out:
+  lock_.unlock();
   return ret;
 }
 
 int ObLoadExternalSort::append_row(const ObLoadDatumRow &datum_row) {
   int ret = OB_SUCCESS;
+  lock_.lock();
   if (IS_NOT_INIT) {
     ret = OB_NOT_INIT;
     LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
@@ -633,6 +646,7 @@ int ObLoadExternalSort::append_row(const ObLoadDatumRow &datum_row) {
   } else if (OB_FAIL(external_sort_.add_item(datum_row))) {
     LOG_WARN("fail to add item", KR(ret));
   }
+  lock_.unlock();
   return ret;
 }
 
@@ -654,6 +668,7 @@ int ObLoadExternalSort::close() {
 
 int ObLoadExternalSort::get_next_row(const ObLoadDatumRow *&datum_row) {
   int ret = OB_SUCCESS;
+  lock_.lock();
   if (IS_NOT_INIT) {
     ret = OB_NOT_INIT;
     LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
@@ -663,6 +678,7 @@ int ObLoadExternalSort::get_next_row(const ObLoadDatumRow *&datum_row) {
   } else if (OB_FAIL(external_sort_.get_next_item(datum_row))) {
     LOG_WARN("fail to get next item", KR(ret));
   }
+  lock_.unlock();
   return ret;
 }
 
@@ -676,8 +692,13 @@ ObLoadSSTableWriter::ObLoadSSTableWriter()
 
 ObLoadSSTableWriter::~ObLoadSSTableWriter() {}
 
-int ObLoadSSTableWriter::init(const ObTableSchema *table_schema, int tenant_id) {
+int ObLoadSSTableWriter::init(const ObTableSchema *table_schema,
+                              int tenant_id) {
   int ret = OB_SUCCESS;
+  lock_.lock();
+  if (IS_INIT) {
+    goto out;
+  }
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
     LOG_WARN("ObLoadSSTableWriter init twice", KR(ret), KP(this));
@@ -732,6 +753,8 @@ int ObLoadSSTableWriter::init(const ObTableSchema *table_schema, int tenant_id) 
       is_inited_ = true;
     }
   }
+out:
+  lock_.unlock();
   return ret;
 }
 
@@ -797,6 +820,7 @@ int ObLoadSSTableWriter::init_macro_block_writer(
 
 int ObLoadSSTableWriter::append_row(const ObLoadDatumRow &datum_row) {
   int ret = OB_SUCCESS;
+  lock_.lock();
   if (IS_NOT_INIT) {
     ret = OB_NOT_INIT;
     LOG_WARN("ObLoadSSTableWriter not init", KR(ret), KP(this));
@@ -820,6 +844,7 @@ int ObLoadSSTableWriter::append_row(const ObLoadDatumRow &datum_row) {
       LOG_WARN("fail to append row", KR(ret));
     }
   }
+  lock_.unlock();
   return ret;
 }
 
@@ -930,8 +955,14 @@ ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(do_load())) {
-    LOG_WARN("fail to do load", KR(ret));
+  if (processed) {
+    if (OB_FAIL(do_load())) {
+      LOG_WARN("fail to do process", KR(ret));
+    }
+  } else {
+    if (OB_FAIL(do_process())) {
+      LOG_WARN("fail to do load", KR(ret));
+    }
   }
   return ret;
 }
@@ -939,10 +970,12 @@ int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
 int ObLoadDataDirectDemo::init(ObLoadDataStmt &load_stmt, int64_t offset,
                                int64_t end) {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(inner_init(load_stmt))) {
-    LOG_WARN("fail to init ObLoadDataDirectDemo", KR(ret));
-  } else {
-    ret = file_reader_.set_offset_end(offset, end);
+  if (!ObLoadDataDirectDemo::processed) {
+    if (OB_FAIL(inner_init(load_stmt))) {
+      LOG_WARN("fail to init ObLoadDataDirectDemo", KR(ret));
+    } else {
+      ret = file_reader_.set_offset_end(offset, end);
+    }
   }
   return ret;
 }
@@ -985,23 +1018,24 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to create buffer", KR(ret));
   }
   // init row_caster_
-  else if (OB_FAIL(row_caster_.init(table_schema, field_or_var_list, tenant_id))) {
+  else if (OB_FAIL(
+               row_caster_.init(table_schema, field_or_var_list, tenant_id))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init external_sort_
-  else if (OB_FAIL(external_sort_.init(table_schema, MEM_BUFFER_SIZE,
-                                       FILE_BUFFER_SIZE, tenant_id))) {
+  else if (OB_FAIL(ObLoadDataDirectDemo::external_sort_.init(
+               table_schema, MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, tenant_id))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init sstable_writer_
-  else if (OB_FAIL(sstable_writer_.init(table_schema, tenant_id))) {
+  else if (OB_FAIL(ObLoadDataDirectDemo::sstable_writer_.init(table_schema,
+                                                              tenant_id))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
   return ret;
 }
 
-// 目前只有一个 filereader，串行读取
-int ObLoadDataDirectDemo::do_load() {
+int ObLoadDataDirectDemo::do_process() {
   int ret = OB_SUCCESS;
   const ObNewRow *new_row = nullptr;
   const ObLoadDatumRow *datum_row = nullptr;
@@ -1039,11 +1073,12 @@ int ObLoadDataDirectDemo::do_load() {
       }
     }
   }
-  if (OB_SUCC(ret)) {
-    if (OB_FAIL(external_sort_.close())) {
-      LOG_WARN("fail to close external sort", KR(ret));
-    }
-  }
+  return ret;
+}
+
+int ObLoadDataDirectDemo::do_load() {
+  int ret = OB_SUCCESS;
+  const ObLoadDatumRow *datum_row = nullptr;
   while (OB_SUCC(ret)) {
     if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
@@ -1056,12 +1091,15 @@ int ObLoadDataDirectDemo::do_load() {
       LOG_WARN("fail to append row", KR(ret));
     }
   }
-  if (OB_SUCC(ret)) {
-    if (OB_FAIL(sstable_writer_.close())) {
-      LOG_WARN("fail to close sstable writer", KR(ret));
-    }
-  }
   return ret;
+}
+
+int ObLoadDataDirectDemo::close_sort() {
+  return external_sort_.close();
+}
+
+int ObLoadDataDirectDemo::close_sstable() {
+  return sstable_writer_.close();
 }
 
 } // namespace sql

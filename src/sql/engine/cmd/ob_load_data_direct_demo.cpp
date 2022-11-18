@@ -20,7 +20,7 @@ using namespace share::schema;
 
 //ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
 //ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;
-bool ObLoadDataDirectDemo::processed = false;
+//bool ObLoadDataDirectDemo::processed_ = false;
 
 /**
  * ObLoadDataBuffer

@@ -76,7 +76,6 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
       LOG_WARN("cannot close sstable", KR(ret));
     }
   }
-  ObLoadDataDirectDemo::processed = false;
   return ret;
 }
 

@@ -205,7 +205,7 @@ public:
   int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end);
   static int close_sort();
   static int close_sstable();
-  static bool volatile processed;
+  static bool processed;
 private:
   int inner_init(ObLoadDataStmt &load_stmt);
   int do_load();

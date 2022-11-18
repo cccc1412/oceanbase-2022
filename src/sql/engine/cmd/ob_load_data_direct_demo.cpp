@@ -18,10 +18,6 @@ using namespace observer;
 using namespace share;
 using namespace share::schema;
 
-ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
-ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;
-bool ObLoadDataDirectDemo::processed = false;
-
 /**
  * ObLoadDataBuffer
  */
@@ -955,7 +951,7 @@ ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (ObLoadDataDirectDemo::processed) {
+  if (processed_) {
     if (OB_FAIL(do_load())) {
       LOG_WARN("fail to do process", KR(ret));
     }
@@ -968,9 +964,14 @@ int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
 }
 
 int ObLoadDataDirectDemo::init(ObLoadDataStmt &load_stmt, int64_t offset,
-                               int64_t end) {
+                               int64_t end, bool processed,
+                               ObLoadExternalSort *external_sort,
+                               ObLoadSSTableWriter *sstable_writer) {
   int ret = OB_SUCCESS;
-  if (!ObLoadDataDirectDemo::processed) {
+  processed_=processed;
+  external_sort_=external_sort;
+  sstable_writer_=sstable_writer;
+  if (!processed_) {
     if (OB_FAIL(inner_init(load_stmt))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo", KR(ret));
     } else {
@@ -1023,12 +1024,12 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init external_sort_
-  else if (OB_FAIL(ObLoadDataDirectDemo::external_sort_.init(
+  else if (OB_FAIL(external_sort_->init(
                table_schema, MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, tenant_id))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init sstable_writer_
-  else if (OB_FAIL(ObLoadDataDirectDemo::sstable_writer_.init(table_schema,
+  else if (OB_FAIL(sstable_writer_->init(table_schema,
                                                               tenant_id))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
@@ -1067,7 +1068,7 @@ int ObLoadDataDirectDemo::do_process() {
           }
         } else if (OB_FAIL(row_caster_.get_casted_row(*new_row, datum_row))) {
           LOG_WARN("fail to cast row", KR(ret));
-        } else if (OB_FAIL(external_sort_.append_row(*datum_row))) {
+        } else if (OB_FAIL(external_sort_->append_row(*datum_row))) {
           LOG_WARN("fail to append row", KR(ret));
         }
       }
@@ -1080,26 +1081,18 @@ int ObLoadDataDirectDemo::do_load() {
   int ret = OB_SUCCESS;
   const ObLoadDatumRow *datum_row = nullptr;
   while (OB_SUCC(ret)) {
-    if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
+    if (OB_FAIL(external_sort_->get_next_row(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
       } else {
         ret = OB_SUCCESS;
         break;
       }
-    } else if (OB_FAIL(sstable_writer_.append_row(*datum_row))) {
+    } else if (OB_FAIL(sstable_writer_->append_row(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
     }
   }
   return ret;
-}
-
-int ObLoadDataDirectDemo::close_sort() {
-  return external_sort_.close();
-}
-
-int ObLoadDataDirectDemo::close_sstable() {
-  return sstable_writer_.close();
 }
 
 } // namespace sql

@@ -154,6 +154,8 @@ public:
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   int get_next_row(const ObLoadDatumRow *&datum_row);
+  void lock() {lock_.lock();}
+  void unlock() {lock_.unlock();}
 private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
@@ -172,6 +174,9 @@ public:
   int init(const share::schema::ObTableSchema *table_schema, int tenant_id);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
+  void lock() { lock_.lock(); }
+  void unlock() { lock_.unlock(); }
+
 private:
   int init_sstable_index_builder(const share::schema::ObTableSchema *table_schema);
   int init_macro_block_writer(const share::schema::ObTableSchema *table_schema);
@@ -202,21 +207,22 @@ public:
   ObLoadDataDirectDemo();
   virtual ~ObLoadDataDirectDemo();
   int execute(ObExecContext &ctx, ObLoadDataStmt &load_stmt) override;
-  int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end);
-  static int close_sort();
-  static int close_sstable();
-  static bool processed;
+  int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end,
+           bool processed_, ObLoadExternalSort *external_sort,
+           ObLoadSSTableWriter *sstable_writer);
 private:
   int inner_init(ObLoadDataStmt &load_stmt);
-  int do_load();
   int do_process();
-private:
+  int do_load();
+
+private: 
+  bool processed_;
   ObLoadCSVPaser csv_parser_;
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
   ObLoadRowCaster row_caster_;
-  static ObLoadExternalSort external_sort_;
-  static ObLoadSSTableWriter sstable_writer_;
+  ObLoadExternalSort* external_sort_;
+  ObLoadSSTableWriter* sstable_writer_;
 };
 
 } // namespace sql

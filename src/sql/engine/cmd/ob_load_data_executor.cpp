@@ -34,9 +34,15 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     return ret;
   }
 
-  ObLoadDataDirectTaskQueue* async_tq = new ObLoadDataDirectTaskQueue;
-  async_tq->init(1, 1 << 10, "ObLoadDataExecutor");
-  async_tq->start();
+  ObLoadExternalSort external_sort;
+  ObLoadSSTableWriter sstable_writer;
+  ObLoadDataDirectTaskQueue async_tq;
+  share::ObTenantBase *obt = MTL_CTX();
+  async_tq.init(3, 1 << 10, "ObLoadDataExe");
+  if (OB_FAIL(ret = async_tq.start())) {
+    LOG_WARN("cannot start async_tq", KR(ret));
+    return ret;
+  }
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
    return OB_FILE_NOT_OPENED;
@@ -44,37 +50,31 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
-      share::ObTenantBase *obt = MTL_CTX();
-      ObLoadDataDirectTask ObLDDT(ctx,stmt,offset,offset + FILE_SPILT_SIZE, obt);
-      if(OB_FAIL(ret = async_tq->push_task(ObLDDT))){
+      ObLoadDataDirectTask ObLDDT(ctx, stmt, offset, offset + FILE_SPILT_SIZE,
+                                  obt, &external_sort, &sstable_writer, false);
+      if(OB_FAIL(ret = async_tq.push_task(ObLDDT))){
         LOG_WARN("cannot push task");
         return ret;
       };
       offset += FILE_SPILT_SIZE;
     }
-    //if (OB_FAIL(ret = async_tq->start())) {
-    //  LOG_WARN("cannot start async_tq", K(ret));
-    //} else {
-    async_tq->wait_all_task();
-    //}
-    //ObLoadDataDirectDemo::processed=true;
-    //if (OB_FAIL(ObLoadDataDirectDemo::close_sort())) {
-    //  LOG_WARN("cannot close sort", K(ret));
-    //} else {
-    //  for (int i = 0; i < IO_THREAD_NUM; i++) {
-    //    share::ObTenantBase *obt = MTL_CTX();
-    //    ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0,
-    //                                obt);
-    //    if (OB_FAIL(ret = async_tq->push_task(ObLDDT))) {
-    //      LOG_WARN("cannot push task");
-    //      return ret;
-    //    };
-    //  }
-    //  async_tq->wait_all_task();
-    //  if (OB_FAIL(ObLoadDataDirectDemo::close_sstable())) {
-    //    LOG_WARN("cannot close sstable", K(ret));
-    //  }
-    //}
+    async_tq.wait_all_task();
+    if (OB_FAIL(external_sort.close())) {
+      LOG_WARN("cannot close sort", KR(ret));
+    } else {
+      for (int i = 0; i < 1; i++) {
+        ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, obt, &external_sort,
+                                    &sstable_writer, true);
+        if (OB_FAIL(ret = async_tq.push_task(ObLDDT))) {
+          LOG_WARN("cannot push task");
+          return ret;
+        };
+      }
+      async_tq.wait_all_task();
+    }
+    if (OB_FAIL(sstable_writer.close())) {
+      LOG_WARN("cannot close sstable", KR(ret));
+    }
   }
   ObLoadDataDirectDemo::processed = false;
   return ret;

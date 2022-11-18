@@ -955,7 +955,7 @@ ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (processed) {
+  if (ObLoadDataDirectDemo::processed) {
     if (OB_FAIL(do_load())) {
       LOG_WARN("fail to do process", KR(ret));
     }

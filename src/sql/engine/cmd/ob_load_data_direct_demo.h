@@ -205,7 +205,7 @@ public:
   int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end);
   static int close_sort();
   static int close_sstable();
-  static bool volatile processed;
+  static bool processed;
 private:
   int inner_init(ObLoadDataStmt &load_stmt);
   int do_load();
@@ -215,8 +215,8 @@ private:
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
   ObLoadRowCaster row_caster_;
-  static volatile ObLoadExternalSort external_sort_;
-  static volatile ObLoadSSTableWriter sstable_writer_;
+  static ObLoadExternalSort external_sort_;
+  static ObLoadSSTableWriter sstable_writer_;
 };
 
 } // namespace sql

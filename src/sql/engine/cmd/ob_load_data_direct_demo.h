@@ -8,6 +8,7 @@
 #include "storage/ob_parallel_external_sort.h"
 #include "storage/tx_storage/ob_ls_handle.h"
 #include "lib/lock/ob_spin_lock.h"
+#include "sql/engine/cmd/ob_load_external_sort.h"
 
 namespace oceanbase
 {
@@ -158,7 +159,7 @@ private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
   ObLoadDatumRowCompare compare_;
-  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
+  storage::MyExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
   bool is_closed_;
   bool is_inited_;
   common::ObSpinLock lock_;
@@ -215,8 +216,8 @@ private:
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
   ObLoadRowCaster row_caster_;
-  static ObLoadExternalSort external_sort_;
-  static ObLoadSSTableWriter sstable_writer_;
+  ObLoadExternalSort external_sort_;
+  ObLoadSSTableWriter sstable_writer_;
 };
 //ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
 //ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;

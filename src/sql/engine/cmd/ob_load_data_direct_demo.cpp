@@ -18,9 +18,9 @@ using namespace observer;
 using namespace share;
 using namespace share::schema;
 
-ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
-ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;
-//bool ObLoadDataDirectDemo::processed = false;
+//ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
+//ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;
+bool ObLoadDataDirectDemo::processed = false;
 
 /**
  * ObLoadDataBuffer
@@ -955,7 +955,7 @@ ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (ObLoadDataDirectDemo::processed) {
+  if (processed) {
     if (OB_FAIL(do_load())) {
       LOG_WARN("fail to do process", KR(ret));
     }
@@ -1094,13 +1094,13 @@ int ObLoadDataDirectDemo::do_load() {
   return ret;
 }
 
-int ObLoadDataDirectDemo::close_sort() {
-  return external_sort_.close();
-}
-
-int ObLoadDataDirectDemo::close_sstable() {
-  return sstable_writer_.close();
-}
+//int ObLoadDataDirectDemo::close_sort() {
+//  return external_sort_.close();
+//}
+//
+//int ObLoadDataDirectDemo::close_sstable() {
+//  return sstable_writer_.close();
+//}
 
 } // namespace sql
 } // namespace oceanbase

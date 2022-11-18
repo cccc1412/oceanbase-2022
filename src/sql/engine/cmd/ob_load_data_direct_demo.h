@@ -7,6 +7,7 @@
 #include "storage/blocksstable/ob_index_block_builder.h"
 #include "storage/ob_parallel_external_sort.h"
 #include "storage/tx_storage/ob_ls_handle.h"
+#include "lib/lock/ob_spin_lock.h"
 
 namespace oceanbase
 {
@@ -160,6 +161,7 @@ private:
   storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
   bool is_closed_;
   bool is_inited_;
+  common::ObSpinLock lock_;
 };
 
 class ObLoadSSTableWriter
@@ -189,6 +191,7 @@ private:
   blocksstable::ObDatumRow datum_row_;
   bool is_closed_;
   bool is_inited_;
+  common::ObSpinLock lock_;
 };
 
 class ObLoadDataDirectDemo : public ObLoadDataBase
@@ -200,16 +203,20 @@ public:
   virtual ~ObLoadDataDirectDemo();
   int execute(ObExecContext &ctx, ObLoadDataStmt &load_stmt) override;
   int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end);
+  static int close_sort();
+  static int close_sstable();
+  static bool volatile processed;
 private:
   int inner_init(ObLoadDataStmt &load_stmt);
   int do_load();
+  int do_process();
 private:
   ObLoadCSVPaser csv_parser_;
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
   ObLoadRowCaster row_caster_;
-  ObLoadExternalSort external_sort_;
-  ObLoadSSTableWriter sstable_writer_;
+  static volatile ObLoadExternalSort external_sort_;
+  static volatile ObLoadSSTableWriter sstable_writer_;
 };
 
 } // namespace sql

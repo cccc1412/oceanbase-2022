@@ -209,8 +209,9 @@ private:
   ObLoadDataBuffer buffer_;
   ObLoadRowCaster row_caster_;
   ObLoadExternalSort external_sort_;
-  ObLoadSSTableWriter sstable_writer_;
+  static ObLoadSSTableWriter sstable_writer_;
 };
-
+//ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;
+ObLoadSSTableWriter ObLoadDataDirectDemo::sstable_writer_;
 } // namespace sql
 } // namespace oceanbase

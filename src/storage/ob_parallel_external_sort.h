@@ -1535,7 +1535,7 @@ int ObMemorySortRound<T, Compare>::build_fragment()
     }
 
     if (OB_SUCC(ret)) {
-      if (OB_FAIL(next_round_->build_fragment())) {
+      if (OB_FAIL(next_round_->build_fragment())) { //这里写磁盘
         STORAGE_LOG(WARN, "fail to build fragment", K(ret));
       } else {
         const int64_t write_fragment_time = common::ObTimeUtility::current_time() - start;

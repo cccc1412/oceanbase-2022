@@ -908,7 +908,7 @@ int ObLoadSSTableWriter::close() {
     LOG_WARN("unexpected closed sstable writer", KR(ret));
   } else {
     ObSSTable *sstable = nullptr;
-    if (OB_FAIL(macro_block_writer_.close())) {
+    if (OB_FAIL(macro_block_writer_.close())) { //这里会刷磁盘
       LOG_WARN("fail to close macro block writer", KR(ret));
     } else if (OB_FAIL(create_sstable())) {
       LOG_WARN("fail to create sstable", KR(ret));

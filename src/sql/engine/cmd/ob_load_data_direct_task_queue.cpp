@@ -51,9 +51,6 @@ void oceanbase::sql::ObLoadDataDirectTaskQueue::run2() {
         ObCurTraceId::init(zero_addr);
         // just do it
         ret = task->process();
-        ObThreadCondGuard guard(cnt_cond_);
-        submit_cnt_++;
-        cnt_cond_.broadcast();
         if (OB_FAIL(ret)) {
           LOG_WARN("task process failed, start retry", "max retry time",
               task->get_retry_times(), "retry interval", task->get_retry_interval(),
@@ -67,6 +64,10 @@ void oceanbase::sql::ObLoadDataDirectTaskQueue::run2() {
               rescheduled = true;
             }
           }
+        } else {
+          ObThreadCondGuard guard(cnt_cond_);
+          submit_cnt_++;
+          cnt_cond_.broadcast();
         }
         if (!rescheduled) {
           task->~ObAsyncTask();
@@ -82,7 +83,7 @@ void oceanbase::sql::ObLoadDataDirectTaskQueue::run2() {
 int oceanbase::sql::ObLoadDataDirectTaskQueue::wait_all_task() {
   int ret = OB_SUCCESS;
   ObThreadCondGuard guard(cnt_cond_);
-  while(submit_cnt_ != task_cnt_) {
+  while(submit_cnt_ != task_cnt_) { //todo
     cnt_cond_.wait();
   }
   return ret;

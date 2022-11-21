@@ -672,9 +672,9 @@ int ObLoadExternalSort::get_next_row(const ObLoadDatumRow *&datum_row) {
   if (IS_NOT_INIT) {
     ret = OB_NOT_INIT;
     LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
-  } else if (OB_UNLIKELY(!is_closed_)) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("unexpected not closed external sort", KR(ret));
+  //} else if (OB_UNLIKELY(!is_closed_)) {
+  //  ret = OB_ERR_UNEXPECTED;
+  //  LOG_WARN("unexpected not closed external sort", KR(ret));
   } else if (OB_FAIL(external_sort_.get_next_item(datum_row))) {
     LOG_WARN("fail to get next item", KR(ret));
   }
@@ -956,6 +956,8 @@ int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
   if (processed_) {
+    this->external_sort_.is_inited_ = true;
+    this->external_sort_.external_sort_.is_inited_ = true;
     if (OB_FAIL(do_load())) {
       LOG_WARN("fail to do process", KR(ret));
     }

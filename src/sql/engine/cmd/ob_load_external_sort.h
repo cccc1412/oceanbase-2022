@@ -861,8 +861,8 @@ int MyExternalSort<T, Compare>::get_next_item(const T *&item)
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "MyExternalSort has not been inited", K(ret));
-  } else if (is_empty_) {
-    ret = common::OB_ITER_END;
+  //} else if (is_empty_) {
+  //  ret = common::OB_ITER_END;
   } else if (memory_sort_round_.has_data() && memory_sort_round_.is_in_memory()) {
     if (OB_FAIL(memory_sort_round_.get_next_item(item))) {
       if (common::OB_ITER_END != ret) {

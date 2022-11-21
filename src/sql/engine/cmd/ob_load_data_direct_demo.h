@@ -9,19 +9,16 @@
 #include "storage/tx_storage/ob_ls_handle.h"
 #include "lib/lock/ob_spin_lock.h"
 
-namespace oceanbase
-{
-namespace sql
-{
-#define MAX_RECORD_SIZE 1024L*1024L
-class ObLoadDataBuffer
-{
+namespace oceanbase {
+namespace sql {
+#define MAX_RECORD_SIZE 1024L * 1024L
+class ObLoadDataBuffer {
 public:
   ObLoadDataBuffer();
   ~ObLoadDataBuffer();
   void reuse();
   void reset();
-  int create(int64_t capacity, int tenant_id);
+  int create(int64_t capacity);
   int squash();
   OB_INLINE char *data() const { return data_; }
   OB_INLINE char *begin() const { return data_ + begin_pos_; }
@@ -31,6 +28,7 @@ public:
   OB_INLINE int64_t get_remain_size() const { return capacity_ - end_pos_; }
   OB_INLINE void consume(int64_t size) { begin_pos_ += size; }
   OB_INLINE void produce(int64_t size) { end_pos_ += size; }
+
 private:
   common::ObArenaAllocator allocator_;
   char *data_;
@@ -39,14 +37,14 @@ private:
   int64_t capacity_;
 };
 
-class ObLoadSequentialFileReader
-{
+class ObLoadSequentialFileReader {
 public:
   ObLoadSequentialFileReader();
   ~ObLoadSequentialFileReader();
   int open(const ObString &filepath);
   int read_next_buffer(ObLoadDataBuffer &buffer);
   int set_offset_end(int64_t offset, int64_t end);
+
 private:
   common::ObFileReader file_reader_;
   int64_t offset_;
@@ -54,24 +52,24 @@ private:
   bool is_read_end_;
 };
 
-class ObLoadCSVPaser
-{
+class ObLoadCSVPaser {
 public:
   ObLoadCSVPaser();
   ~ObLoadCSVPaser();
   void reset();
   int init(const ObDataInFileStruct &format, int64_t column_count,
-           common::ObCollationType collation_type, int tenant_id);
+           common::ObCollationType collation_type);
   int get_next_row(ObLoadDataBuffer &buffer, const common::ObNewRow *&row);
+
 private:
-  struct UnusedRowHandler
-  {
-    int operator()(common::ObIArray<ObCSVGeneralParser::FieldValue> &fields_per_line)
-    {
+  struct UnusedRowHandler {
+    int operator()(
+        common::ObIArray<ObCSVGeneralParser::FieldValue> &fields_per_line) {
       UNUSED(fields_per_line);
       return OB_SUCCESS;
     }
   };
+
 private:
   common::ObArenaAllocator allocator_;
   common::ObCollationType collation_type_;
@@ -82,18 +80,20 @@ private:
   bool is_inited_;
 };
 
-class ObLoadDatumRow
-{
+class ObLoadDatumRow {
   OB_UNIS_VERSION(1);
+
 public:
   ObLoadDatumRow();
   ~ObLoadDatumRow();
   void reset();
-  int init(int64_t capacity, int tenant_id);
+  int init(int64_t capacity);
   int64_t get_deep_copy_size() const;
-  int deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len, int64_t &pos);
+  int deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
+                int64_t &pos);
   OB_INLINE bool is_valid() const { return count_ > 0 && nullptr != datums_; }
   DECLARE_TO_STRING;
+
 public:
   common::ObArenaAllocator allocator_;
   int64_t capacity_;
@@ -101,16 +101,18 @@ public:
   blocksstable::ObStorageDatum *datums_;
 };
 
-class ObLoadDatumRowCompare
-{
+class ObLoadDatumRowCompare {
 public:
   ObLoadDatumRowCompare();
   ~ObLoadDatumRowCompare();
-  int init(int64_t rowkey_column_num, const blocksstable::ObStorageDatumUtils *datum_utils);
+  int init(int64_t rowkey_column_num,
+           const blocksstable::ObStorageDatumUtils *datum_utils);
   bool operator()(const ObLoadDatumRow *lhs, const ObLoadDatumRow *rhs);
   int get_error_code() const { return result_code_; }
+
 public:
   int result_code_;
+
 private:
   int64_t rowkey_column_num_;
   const blocksstable::ObStorageDatumUtils *datum_utils_;
@@ -119,23 +121,29 @@ private:
   bool is_inited_;
 };
 
-class ObLoadRowCaster
-{
+class ObLoadRowCaster {
 public:
   ObLoadRowCaster();
   ~ObLoadRowCaster();
   int init(const share::schema::ObTableSchema *table_schema,
-           const common::ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list, int tenant_id);
-  int get_casted_row(const common::ObNewRow &new_row, const ObLoadDatumRow *&datum_row);
+           const common::ObIArray<ObLoadDataStmt::FieldOrVarStruct>
+               &field_or_var_list);
+  int get_casted_row(const common::ObNewRow &new_row,
+                     const ObLoadDatumRow *&datum_row);
+
 private:
   int init_column_schemas_and_idxs(
-    const share::schema::ObTableSchema *table_schema,
-    const common::ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list);
+      const share::schema::ObTableSchema *table_schema,
+      const common::ObIArray<ObLoadDataStmt::FieldOrVarStruct>
+          &field_or_var_list);
   int cast_obj_to_datum(const share::schema::ObColumnSchemaV2 *column_schema,
-                        const common::ObObj &obj, blocksstable::ObStorageDatum &datum);
+                        const common::ObObj &obj,
+                        blocksstable::ObStorageDatum &datum);
+
 private:
   common::ObArray<const share::schema::ObColumnSchemaV2 *> column_schemas_;
-  common::ObArray<int64_t> column_idxs_; // Mapping of store columns to source data columns
+  common::ObArray<int64_t>
+      column_idxs_; // Mapping of store columns to source data columns
   int64_t column_count_;
   common::ObCollationType collation_type_;
   ObLoadDatumRow datum_row_;
@@ -144,13 +152,12 @@ private:
   bool is_inited_;
 };
 
-class ObLoadExternalSort
-{
+class ObLoadExternalSort {
 public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
   int init(const share::schema::ObTableSchema *table_schema, int64_t mem_size,
-           int64_t file_buf_size, int tenant_id);
+           int64_t file_buf_size);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   int get_next_row(const ObLoadDatumRow *&datum_row);
@@ -166,21 +173,22 @@ private:
   common::ObSpinLock lock_;
 };
 
-class ObLoadSSTableWriter
-{
+class ObLoadSSTableWriter {
 public:
   ObLoadSSTableWriter();
   ~ObLoadSSTableWriter();
-  int init(const share::schema::ObTableSchema *table_schema, int tenant_id);
+  int init(const share::schema::ObTableSchema *table_schema);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   void lock() { lock_.lock(); }
   void unlock() { lock_.unlock(); }
 
 private:
-  int init_sstable_index_builder(const share::schema::ObTableSchema *table_schema);
+  int init_sstable_index_builder(
+      const share::schema::ObTableSchema *table_schema);
   int init_macro_block_writer(const share::schema::ObTableSchema *table_schema);
   int create_sstable();
+
 private:
   common::ObTabletID tablet_id_;
   storage::ObTabletHandle tablet_handle_;
@@ -199,9 +207,8 @@ private:
   common::ObSpinLock lock_;
 };
 
-class ObLoadDataDirectDemo : public ObLoadDataBase
-{
-  static const int64_t MEM_BUFFER_SIZE = (1LL << 30); // 1G
+class ObLoadDataDirectDemo : public ObLoadDataBase {
+  static const int64_t MEM_BUFFER_SIZE = (1LL << 30);  // 1G
   static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
 public:
   ObLoadDataDirectDemo();

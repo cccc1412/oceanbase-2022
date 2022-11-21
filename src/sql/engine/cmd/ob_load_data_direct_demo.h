@@ -161,9 +161,13 @@ private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
   ObLoadDatumRowCompare compare_;
+public:
   storage::MyExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
+private:
   bool is_closed_;
+public:
   bool is_inited_;
+private: 
   common::ObSpinLock lock_;
 };
 
@@ -209,12 +213,17 @@ public:
   virtual ~ObLoadDataDirectDemo();
   int execute(ObExecContext &ctx, ObLoadDataStmt &load_stmt) override;
   int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end,
-           bool processed_, ObLoadExternalSort *external_sort,
+           bool processed_,
+           //ObLoadExternalSort *external_sort,
            ObLoadSSTableWriter *sstable_writer);
 private:
   int inner_init(ObLoadDataStmt &load_stmt);
   int do_process();
   int do_load();
+
+public:
+  ObLoadExternalSort external_sort_;
+
 
 private: 
   bool processed_;
@@ -222,7 +231,6 @@ private:
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
   ObLoadRowCaster row_caster_;
-  ObLoadExternalSort* external_sort_;
   ObLoadSSTableWriter* sstable_writer_;
 };
 //ObLoadExternalSort ObLoadDataDirectDemo::external_sort_;

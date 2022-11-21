@@ -806,10 +806,11 @@ int ObFragmentMerge<T, Compare>::init(
     const common::ObIArray<FragmentIterator *> &iters, Compare *compare)
 {
   int ret = common::OB_SUCCESS;
-  if (OB_UNLIKELY(is_inited_)) {
-    ret = common::OB_INIT_TWICE;
-    STORAGE_LOG(WARN, "ObFragmentMerge has been inited", K(ret));
-  } else if (0 == iters.count() || NULL == compare) {
+  //if (OB_UNLIKELY(is_inited_)) {
+  //  ret = common::OB_INIT_TWICE;
+  //  STORAGE_LOG(WARN, "ObFragmentMerge has been inited", K(ret));
+  //} else 
+  if (0 == iters.count() || NULL == compare) {
     ret = common::OB_INVALID_ARGUMENT;
     STORAGE_LOG(WARN, "invalid argument", K(ret), K(iters.count()), KP(compare));
   } else if (OB_FAIL(iters_.assign(iters))) {

@@ -34,11 +34,11 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     return ret;
   }
 
-  ObLoadExternalSort external_sort;
+  //ObLoadExternalSort external_sort;
   ObLoadSSTableWriter sstable_writer;
   ObLoadDataDirectTaskQueue async_tq;
   share::ObTenantBase *obt = MTL_CTX();
-  async_tq.init(1, 1 << 10, "ObLoadDataExe");
+  async_tq.init(10, 1 << 10, "ObLoadDataExe");
   if (OB_FAIL(ret = async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));
     return ret;
@@ -47,11 +47,17 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
    return OB_FILE_NOT_OPENED;
   } else {
+    ObLoadDataDirectDemo *virtual_load_direct_ = OB_NEWx(ObLoadDataDirectDemo, (&ctx.get_allocator()));
+    //ObLoadDataDirectDemo *virtual_load_direct_ = new ObLoadDataDirectDemo;
+    //virtual_load_direct_->external_sort_.external_sort_.init();
+    virtual_load_direct_->external_sort_.is_inited_ = true;
+    virtual_load_direct_->external_sort_.external_sort_.is_inited_ = true;
+    virtual_load_direct_->external_sort_.external_sort_.memory_sort_round_.is_inited_ = true;
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
       ObLoadDataDirectTask ObLDDT(ctx, stmt, offset, offset + FILE_SPILT_SIZE,
-                                  obt, &external_sort, &sstable_writer, false);
+                                  obt, &sstable_writer, false);
       if(OB_FAIL(ret = async_tq.push_task(ObLDDT))){
         LOG_WARN("cannot push task");
         return ret;
@@ -59,11 +65,11 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
       offset += FILE_SPILT_SIZE;
     }
     async_tq.wait_all_task();
-    if (OB_FAIL(external_sort.close())) {
+    if (OB_FAIL(virtual_load_direct_->external_sort_.close())) {
       LOG_WARN("cannot close sort", KR(ret));
     } else {
       for (int i = 0; i < 1; i++) {
-        ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, obt, &external_sort,
+        ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, obt,
                                     &sstable_writer, true);
         if (OB_FAIL(ret = async_tq.push_task(ObLDDT))) {
           LOG_WARN("cannot push task");

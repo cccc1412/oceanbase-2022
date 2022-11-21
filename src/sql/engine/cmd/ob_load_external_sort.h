@@ -56,12 +56,17 @@ private:
   FragmentWriter writer_;
   int64_t expire_timestamp_;
   Compare *compare_;
-  FragmentMerger merger_;
+public:
+  static FragmentMerger merger_;
+private:
   common::ObArenaAllocator allocator_;
   uint64_t tenant_id_;
   int64_t dir_id_;
   bool is_writer_opened_;
 };
+
+template<typename T, typename Compare>
+ObFragmentMerge<T, Compare> MyExternalSortRound<T,Compare>::merger_;
 
 
 template<typename T, typename Compare>
@@ -72,7 +77,8 @@ common::ObSpinLock MyExternalSortRound<T,Compare>::iters_lock_;
 template<typename T, typename Compare>
 MyExternalSortRound<T, Compare>::MyExternalSortRound()
   : is_inited_(false), merge_count_(0), file_buf_size_(0), writer_(),
-    expire_timestamp_(0), compare_(NULL), merger_(),
+    expire_timestamp_(0), compare_(NULL), 
+    //merger_(),
     allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
     tenant_id_(common::OB_INVALID_ID), dir_id_(-1), is_writer_opened_(false)
 {
@@ -382,7 +388,7 @@ int MyExternalSortRound<T, Compare>::clean_up()
   is_inited_ = false;
   merge_count_ = 0;
   file_buf_size_ = 0;
-  iters_.reset();
+  //iters_.reset();
   expire_timestamp_ = 0;
   compare_ = NULL;
   merger_.reset();
@@ -412,8 +418,9 @@ public:
       K(expire_timestamp_), KP(next_round_), KP(compare_), KP(iter_));
 private:
   int build_iterator();
-private:
+public:
   bool is_inited_;
+private:
   bool is_in_memory_;
   bool has_data_;
   int64_t buf_mem_limit_;
@@ -550,13 +557,13 @@ int MyMemorySortRound<T, Compare>::finish()
     STORAGE_LOG(WARN, "MyMemorySortRound has not been inited", K(ret));
   } else if (0 == item_list_.size()) {
     has_data_ = false;
-  } else if (0 == next_round_->get_fragment_count()) {
-    is_in_memory_ = true;
-    has_data_ = true;
-    std::sort(item_list_.begin(), item_list_.end(), *compare_);
-    if (OB_FAIL(compare_->result_code_)) {
-      STORAGE_LOG(WARN, "fail to sort item list", K(ret));
-    }
+  //} else if (0 == next_round_->get_fragment_count()) {
+  //  is_in_memory_ = true;
+  //  has_data_ = true;
+  //  std::sort(item_list_.begin(), item_list_.end(), *compare_);
+  //  if (OB_FAIL(compare_->result_code_)) {
+  //    STORAGE_LOG(WARN, "fail to sort item list", K(ret));
+  //  }
   } else {
     is_in_memory_ = false;
     has_data_ = true;
@@ -675,24 +682,63 @@ public:
       K(merge_count_per_round_), KP(tenant_id_), KP(compare_));
 private:
   static const int64_t EXTERNAL_SORT_ROUND_CNT = 2;
+public:
   bool is_inited_;
-  int64_t file_buf_size_;
-  int64_t buf_mem_limit_;
-  int64_t expire_timestamp_;
-  int64_t merge_count_per_round_;
-  Compare *compare_;
+private:
+  static int64_t file_buf_size_;
+  static int64_t buf_mem_limit_;
+  static int64_t expire_timestamp_;
+  static int64_t merge_count_per_round_;
+  static Compare *compare_;
+public:
   MemorySortRound memory_sort_round_;
-  ExternalSortRound sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
-  ExternalSortRound *curr_round_;
-  ExternalSortRound *next_round_;
+private:
+  static ExternalSortRound sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
+  static ExternalSortRound *curr_round_;
+  static ExternalSortRound *next_round_;
+public:  
   bool is_empty_;
+private:
   uint64_t tenant_id_;
 };
 
 template<typename T, typename Compare>
+int64_t MyExternalSort<T, Compare>::file_buf_size_;
+
+template<typename T, typename Compare>
+int64_t MyExternalSort<T, Compare>::buf_mem_limit_;
+
+template<typename T, typename Compare>
+int64_t MyExternalSort<T, Compare>::expire_timestamp_;
+
+template<typename T, typename Compare>
+int64_t MyExternalSort<T, Compare>::merge_count_per_round_;
+
+template<typename T, typename Compare>
+Compare* MyExternalSort<T, Compare>::compare_;
+
+
+
+
+//template<typename T, typename Compare>
+//MyExternalSortRound<T, Compare> MyExternalSort<T, Compare>::memory_sort_round_; 
+
+template<typename T, typename Compare>
+MyExternalSortRound<T, Compare> MyExternalSort<T, Compare>::sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
+
+template<typename T, typename Compare>
+MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::curr_round_;
+
+template<typename T, typename Compare>
+MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::next_round_;
+
+template<typename T, typename Compare>
 MyExternalSort<T, Compare>::MyExternalSort()
-  : is_inited_(false), file_buf_size_(0), buf_mem_limit_(0), expire_timestamp_(0), merge_count_per_round_(0),
-    compare_(NULL), memory_sort_round_(), curr_round_(NULL), next_round_(NULL),
+  : is_inited_(false), 
+    //file_buf_size_(0), buf_mem_limit_(0), expire_timestamp_(0), merge_count_per_round_(0),
+    //compare_(NULL), 
+    memory_sort_round_(), 
+    //curr_round_(NULL), next_round_(NULL),
     is_empty_(true), tenant_id_(common::OB_INVALID_ID)
 {
 }
@@ -915,6 +961,11 @@ int MyExternalSort<T, Compare>::transfer_final_sorted_fragment_iter(
   }
   return ret;
 }
+
+
+
+
+
 
 }  // end namespace storage
 }  // end namespace oceanbase

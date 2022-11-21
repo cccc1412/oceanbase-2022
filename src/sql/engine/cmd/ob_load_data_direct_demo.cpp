@@ -969,11 +969,11 @@ int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
 
 int ObLoadDataDirectDemo::init(ObLoadDataStmt &load_stmt, int64_t offset,
                                int64_t end, bool processed,
-                               ObLoadExternalSort *external_sort,
+                               //ObLoadExternalSort *external_sort,
                                ObLoadSSTableWriter *sstable_writer) {
   int ret = OB_SUCCESS;
   processed_=processed;
-  external_sort_=external_sort;
+  //external_sort_=external_sort;
   sstable_writer_=sstable_writer;
   if (!processed_) {
     if (OB_FAIL(inner_init(load_stmt))) {
@@ -1028,7 +1028,7 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init external_sort_
-  else if (OB_FAIL(external_sort_->init(
+  else if (OB_FAIL(external_sort_.init(
                table_schema, MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, tenant_id))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
@@ -1072,11 +1072,18 @@ int ObLoadDataDirectDemo::do_process() {
           }
         } else if (OB_FAIL(row_caster_.get_casted_row(*new_row, datum_row))) {
           LOG_WARN("fail to cast row", KR(ret));
-        } else if (OB_FAIL(external_sort_->append_row(*datum_row))) {
+        } else if (OB_FAIL(external_sort_.append_row(*datum_row))) {
           LOG_WARN("fail to append row", KR(ret));
         }
       }
     }
+  }
+
+  if (OB_FAIL(external_sort_.external_sort_.memory_sort_round_.finish())) {
+    STORAGE_LOG(WARN, "fail to finish memory sort round", K(ret));
+  } else if (external_sort_.external_sort_.memory_sort_round_.has_data() && external_sort_.external_sort_.memory_sort_round_.is_in_memory()) {
+    STORAGE_LOG(INFO, "all data sorted in memory");
+    external_sort_.external_sort_.is_empty_ = false;
   }
   return ret;
 }
@@ -1085,7 +1092,7 @@ int ObLoadDataDirectDemo::do_load() {
   int ret = OB_SUCCESS;
   const ObLoadDatumRow *datum_row = nullptr;
   while (OB_SUCC(ret)) {
-    if (OB_FAIL(external_sort_->get_next_row(datum_row))) {
+    if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
       } else {

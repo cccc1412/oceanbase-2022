@@ -1,11 +1,12 @@
 SET GLOBAL secure_file_priv = "";
 SET GLOBAL ob_query_timeout=36000000000;
 load data infile "/home/nxz/Data/lineitem.tbl.simple" into table lineitem_bulk fields terminated by "|";
+load data infile "/home/nxz/Data/lineitem.tbl.simple.shuf" into table lineitem_bulk2 fields terminated by "|";
 select count(*) from lineitem_bulk;
 drop table lineitem_bulk;
 select * from lineitem_bulk where l_linenumber<1000;
 
-create table lineitem_bulk (
+create table lineitem_bulk2 (
  l_orderkey BIGINT NOT NULL,
  l_partkey BIGINT NOT NULL,
  l_suppkey INTEGER NOT NULL,

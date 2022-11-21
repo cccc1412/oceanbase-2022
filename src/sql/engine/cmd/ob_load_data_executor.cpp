@@ -13,15 +13,15 @@
 #define USING_LOG_PREFIX SQL_ENG
 #include "lib/thread/ob_async_task_queue.h"
 #include "share/rc/ob_tenant_base.h"
+#include "sql/engine/cmd/ob_load_data_direct_task_queue.h"
 
 #include "sql/engine/cmd/ob_load_data_executor.h"
 
 #include "lib/oblog/ob_log_module.h"
 #include "ob_load_data_direct_task.h"
-#include "sql/engine/cmd/ob_load_data_direct_demo.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/ob_exec_context.h"
-#include "sql/engine/cmd/ob_load_data_direct_task_queue.h"
+
 #include <stdlib.h>
 
 namespace oceanbase {
@@ -36,46 +36,80 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
 
   ObLoadExternalSort external_sort;
   ObLoadSSTableWriter sstable_writer;
-  ObLoadDataDirectTaskQueue async_tq;
-  share::ObTenantBase *obt = MTL_CTX();
-  async_tq.init(3, 1 << 10, "ObLoadDataExe");
-  if (OB_FAIL(ret = async_tq.start())) {
-    LOG_WARN("cannot start async_tq", KR(ret));
-    return ret;
+  if (OB_FAIL(do_process(ctx, stmt, external_sort, sstable_writer))) {
+    LOG_WARN("do process fail", KR(ret));
+  } else if (OB_FAIL(do_load(ctx, stmt, external_sort, sstable_writer))) {
+    LOG_WARN("do load fail", KR(ret));
+  } else {
+    LOG_INFO("load data success");
   }
+  return ret;
+}
+
+int ObLoadDataExecutor::do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
+                                   ObLoadExternalSort &external_sort,
+                                   ObLoadSSTableWriter &sstable_writer) {
+  int ret = OB_SUCCESS;
   struct stat st;
+  ObLoadDataDirectTaskQueue async_tq;
+  async_tq.set_run_wrapper(MTL_CTX());
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
-   return OB_FILE_NOT_OPENED;
+    LOG_WARN("cannot load file");
+    ret = OB_FILE_NOT_OPENED;
+  } else if (OB_FAIL(
+                 async_tq.init(PROCESS_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
+    LOG_WARN("cannot init async_tq", KR(ret));
+  } else if (OB_FAIL(async_tq.start())) {
+    LOG_WARN("cannot start async_tq", KR(ret));
   } else {
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
       ObLoadDataDirectTask ObLDDT(ctx, stmt, offset, offset + FILE_SPILT_SIZE,
-                                  obt, &external_sort, &sstable_writer, false);
-      if(OB_FAIL(ret = async_tq.push_task(ObLDDT))){
-        LOG_WARN("cannot push task");
-        return ret;
+                                  false, &external_sort, &sstable_writer);
+      if (OB_FAIL(async_tq.push_task(ObLDDT))) {
+        LOG_WARN("cannot push task", KR(ret));
+        goto out;
       };
       offset += FILE_SPILT_SIZE;
     }
-    async_tq.wait_all_task();
-    if (OB_FAIL(external_sort.close())) {
-      LOG_WARN("cannot close sort", KR(ret));
-    } else {
-      for (int i = 0; i < 1; i++) {
-        ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, obt, &external_sort,
-                                    &sstable_writer, true);
-        if (OB_FAIL(ret = async_tq.push_task(ObLDDT))) {
-          LOG_WARN("cannot push task");
-          return ret;
-        };
-      }
-      async_tq.wait_all_task();
-    }
-    if (OB_FAIL(sstable_writer.close())) {
-      LOG_WARN("cannot close sstable", KR(ret));
-    }
+    async_tq.wait_task();
   }
+out:
+  async_tq.stop();
+  async_tq.wait();
+  return ret;
+}
+
+int ObLoadDataExecutor::do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
+                 ObLoadExternalSort &external_sort,
+                 ObLoadSSTableWriter &sstable_writer) {
+  int ret = OB_SUCCESS;
+  ObLoadDataDirectTaskQueue async_tq;
+  async_tq.set_run_wrapper(MTL_CTX());
+  if (OB_FAIL(external_sort.close())) {
+      LOG_WARN("cannot close sort", KR(ret));
+  } else if (OB_FAIL(async_tq.init(IO_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
+    LOG_WARN("cannot init async_tq", KR(ret));
+  } else if (OB_FAIL(async_tq.start())) {
+    LOG_WARN("cannot start async_tq", KR(ret));
+  } else {
+    for (int i = 0; i < IO_THREAD_NUM; i++) {
+      ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, true, &external_sort,
+                                  &sstable_writer);
+      if (OB_FAIL(async_tq.push_task(ObLDDT))) {
+        LOG_WARN("cannot push task", KR(ret));
+        goto out;
+      };
+    }
+    async_tq.wait_task();
+  }
+  if (OB_FAIL(sstable_writer.close())) {
+    LOG_WARN("cannot close sstable", KR(ret));
+  }
+out:
+  async_tq.stop();
+  async_tq.wait();
   return ret;
 }
 

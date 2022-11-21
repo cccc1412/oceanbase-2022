@@ -12,27 +12,23 @@ namespace sql {
 class ObLoadDataDirectTask : public share::ObAsyncTask {
 public:
   ObLoadDataDirectTask(ObExecContext &ctx, ObLoadDataStmt &stmt, int64_t offset,
-                       int64_t end, share::ObTenantBase *obt,
+                       int64_t end, bool processed,
                        ObLoadExternalSort *external_sort,
-                       ObLoadSSTableWriter *sstable_writer, bool processed,
-                       ObLoadDataDirectDemo *load_direct = nullptr)
-      : ctx_(ctx), stmt_(stmt), offset_(offset), end_(end), obt_(obt),
-        external_sort_(external_sort), sstable_writer_(sstable_writer),
-        processed_(processed), load_direct_(load_direct){};
+                       ObLoadSSTableWriter *sstable_writer)
+      : ctx_(ctx), stmt_(stmt), offset_(offset), end_(end),
+        processed_(processed),
+        external_sort_(external_sort), sstable_writer_(sstable_writer){};
   virtual int process() override;
   virtual int64_t get_deep_copy_size() const override {return sizeof(ObLoadDataDirectTask);};
   virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override;
 private:
-  int prepare();
   ObExecContext &ctx_;
   ObLoadDataStmt &stmt_;
   int64_t offset_;
   int64_t end_;
-  share::ObTenantBase *obt_;
+  bool processed_;
   ObLoadExternalSort *external_sort_;
   ObLoadSSTableWriter *sstable_writer_;
-  bool processed_;
-  ObLoadDataDirectDemo *load_direct_ = nullptr;
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataDirectTask);
 };
 

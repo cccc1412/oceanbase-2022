@@ -12,6 +12,7 @@
 
 #ifndef OCEANBASE_LOAD_DATA_EXECUTOR_H_
 #define OCEANBASE_LOAD_DATA_EXECUTOR_H_
+#include "sql/engine/cmd/ob_load_data_direct_demo.h"
 #include "sql/resolver/cmd/ob_load_data_stmt.h"
 namespace oceanbase
 {
@@ -19,9 +20,9 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t FILE_SPILT_SIZE = 1L * 1024L * 1024L * 256L;
-  static const int64_t PROCESS_THREAD_NUM = 8;
-  static const int64_t IO_THREAD_NUM=16;
+  static const int64_t FILE_SPILT_SIZE = 1L * 1024L * 1024L * 1024L;
+  static const int64_t PROCESS_THREAD_NUM = 9;
+  static const int64_t IO_THREAD_NUM=1;
 public:
   ObLoadDataExecutor() {}
   virtual ~ObLoadDataExecutor() {}
@@ -32,7 +33,12 @@ private:
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataExecutor);
   // function members
 private:
-  // data members
+  int do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
+                 ObLoadExternalSort &external_sort,
+                 ObLoadSSTableWriter &sstable_writer);
+  int do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
+              ObLoadExternalSort &external_sort,
+              ObLoadSSTableWriter &sstable_writer);
 };
 
 } // end namespace sql

@@ -1,6 +1,7 @@
 #ifndef OCEANBASE_STORAGE_MY_PARALLEL_EXTERNAL_SORT_H_
 #define OCEANBASE_STORAGE_MY_PARALLEL_EXTERNAL_SORT_H_
 
+#include "lib/ob_define.h"
 #include "storage/blocksstable/ob_block_manager.h"
 #include "share/ob_define.h"
 #include "lib/container/ob_array.h"
@@ -13,6 +14,7 @@
 #include "storage/blocksstable/ob_tmp_file.h"
 #include "share/config/ob_server_config.h"
 #include "storage/ob_parallel_external_sort.h"
+#include <cstdlib>
 
 namespace oceanbase
 {
@@ -95,10 +97,11 @@ int MyExternalSortRound<T, Compare>::init(
     const uint64_t tenant_id, Compare *compare)
 {
   int ret = common::OB_SUCCESS;
-  if (OB_UNLIKELY(is_inited_)) {
-    ret = common::OB_INIT_TWICE;
-    STORAGE_LOG(WARN, "MyExternalSortRound has been inited", K(ret));
-  } else if (merge_count < ObExternalSortConstant::MIN_MULTIPLE_MERGE_COUNT
+  //if (OB_UNLIKELY(is_inited_)) {
+  //  ret = common::OB_INIT_TWICE;
+  //  STORAGE_LOG(WARN, "MyExternalSortRound has been inited", K(ret));
+  //} else 
+  if (merge_count < ObExternalSortConstant::MIN_MULTIPLE_MERGE_COUNT
       || file_buf_size % DIO_ALIGN_SIZE != 0
       || common::OB_INVALID_ID == tenant_id
       || NULL == compare) {
@@ -132,7 +135,7 @@ int MyExternalSortRound<T, Compare>::add_item(const T &item)
     ret = common::OB_TIMEOUT;
     STORAGE_LOG(WARN, "MyExternalSortRound timeout", K(ret), K(expire_timestamp_));
   } else if (!is_writer_opened_ && OB_FAIL(writer_.open(file_buf_size_,
-      expire_timestamp_, tenant_id_, dir_id_))) {
+      expire_timestamp_, tenant_id_, dir_id_ + GETTID()) )) {
     STORAGE_LOG(WARN, "fail to open writer", K(ret), K_(tenant_id), K_(dir_id));
   } else {
     is_writer_opened_ = true;

@@ -12,12 +12,10 @@ namespace sql {
 class ObLoadDataDirectTask : public share::ObAsyncTask {
 public:
   ObLoadDataDirectTask(ObExecContext &ctx, ObLoadDataStmt &stmt, int64_t offset,
-                       int64_t end, share::ObTenantBase *obt,
-                       //ObLoadExternalSort *external_sort,
+                       int64_t end,
                        ObLoadSSTableWriter *sstable_writer, bool processed,
                        ObLoadDataDirectDemo *load_direct = nullptr)
-      : ctx_(ctx), stmt_(stmt), offset_(offset), end_(end), obt_(obt),
-        //external_sort_(external_sort),
+      : ctx_(ctx), stmt_(stmt), offset_(offset), end_(end),
         sstable_writer_(sstable_writer),
         processed_(processed), load_direct_(load_direct){};
   virtual int process() override;
@@ -29,8 +27,6 @@ private:
   ObLoadDataStmt &stmt_;
   int64_t offset_;
   int64_t end_;
-  share::ObTenantBase *obt_;
-  //ObLoadExternalSort *external_sort_;
   ObLoadSSTableWriter *sstable_writer_;
   bool processed_;
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataDirectTask);

@@ -22,7 +22,7 @@ public:
   ~ObLoadDataBuffer();
   void reuse();
   void reset();
-  int create(int64_t capacity, int tenant_id);
+  int create(int64_t capacity);
   int squash();
   OB_INLINE char *data() const { return data_; }
   OB_INLINE char *begin() const { return data_ + begin_pos_; }
@@ -62,7 +62,7 @@ public:
   ~ObLoadCSVPaser();
   void reset();
   int init(const ObDataInFileStruct &format, int64_t column_count,
-           common::ObCollationType collation_type, int tenant_id);
+           common::ObCollationType collation_type);
   int get_next_row(ObLoadDataBuffer &buffer, const common::ObNewRow *&row);
 private:
   struct UnusedRowHandler
@@ -90,7 +90,7 @@ public:
   ObLoadDatumRow();
   ~ObLoadDatumRow();
   void reset();
-  int init(int64_t capacity, int tenant_id);
+  int init(int64_t capacity);
   int64_t get_deep_copy_size() const;
   int deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len, int64_t &pos);
   OB_INLINE bool is_valid() const { return count_ > 0 && nullptr != datums_; }
@@ -126,7 +126,7 @@ public:
   ObLoadRowCaster();
   ~ObLoadRowCaster();
   int init(const share::schema::ObTableSchema *table_schema,
-           const common::ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list, int tenant_id);
+           const common::ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list);
   int get_casted_row(const common::ObNewRow &new_row, const ObLoadDatumRow *&datum_row);
 private:
   int init_column_schemas_and_idxs(
@@ -151,7 +151,7 @@ public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
   int init(const share::schema::ObTableSchema *table_schema, int64_t mem_size,
-           int64_t file_buf_size, int tenant_id);
+           int64_t file_buf_size);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   int get_next_row(const ObLoadDatumRow *&datum_row);
@@ -176,7 +176,7 @@ class ObLoadSSTableWriter
 public:
   ObLoadSSTableWriter();
   ~ObLoadSSTableWriter();
-  int init(const share::schema::ObTableSchema *table_schema, int tenant_id);
+  int init(const share::schema::ObTableSchema *table_schema);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   void lock() { lock_.lock(); }

@@ -1,5 +1,6 @@
 
 
+#include "share/rc/ob_tenant_base.h"
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/cmd/ob_load_data_direct_demo.h"
@@ -45,7 +46,7 @@ void ObLoadDataBuffer::reset() {
   capacity_ = 0;
 }
 
-int ObLoadDataBuffer::create(int64_t capacity, int tenant_id) {
+int ObLoadDataBuffer::create(int64_t capacity) {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(nullptr != data_)) {
     ret = OB_INIT_TWICE;
@@ -54,7 +55,7 @@ int ObLoadDataBuffer::create(int64_t capacity, int tenant_id) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid args", KR(ret), K(capacity));
   } else {
-    allocator_.set_tenant_id(tenant_id);
+    allocator_.set_tenant_id(MTL_ID());
     if (OB_ISNULL(data_ = static_cast<char *>(allocator_.alloc(capacity)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("fail to alloc memory", KR(ret), K(capacity));
@@ -183,7 +184,7 @@ void ObLoadCSVPaser::reset() {
 }
 
 int ObLoadCSVPaser::init(const ObDataInFileStruct &format, int64_t column_count,
-                         ObCollationType collation_type, int tenant_id) {
+                         ObCollationType collation_type) {
   int ret = OB_SUCCESS;
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
@@ -191,7 +192,7 @@ int ObLoadCSVPaser::init(const ObDataInFileStruct &format, int64_t column_count,
   } else if (OB_FAIL(csv_parser_.init(format, column_count, collation_type))) {
     LOG_WARN("fail to init csv parser", KR(ret));
   } else {
-    allocator_.set_tenant_id(tenant_id);
+    allocator_.set_tenant_id(MTL_ID());
     ObObj *objs = nullptr;
     if (OB_ISNULL(objs = static_cast<ObObj *>(
                       allocator_.alloc(sizeof(ObObj) * column_count)))) {
@@ -264,14 +265,14 @@ void ObLoadDatumRow::reset() {
   datums_ = nullptr;
 }
 
-int ObLoadDatumRow::init(int64_t capacity, int tenant_id = MTL_ID()) {
+int ObLoadDatumRow::init(int64_t capacity) {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(capacity <= 0)) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid args", KR(ret), K(capacity));
   } else {
     reset();
-    allocator_.set_tenant_id(tenant_id);
+    allocator_.set_tenant_id(MTL_ID());
     if (OB_ISNULL(datums_ = static_cast<ObStorageDatum *>(
                       allocator_.alloc(sizeof(ObStorageDatum) * capacity)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
@@ -441,8 +442,7 @@ ObLoadRowCaster::~ObLoadRowCaster() {}
 
 int ObLoadRowCaster::init(
     const ObTableSchema *table_schema,
-    const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list,
-    int tenant_id) {
+    const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list) {
   int ret = OB_SUCCESS;
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
@@ -457,13 +457,12 @@ int ObLoadRowCaster::init(
   } else if (OB_FAIL(init_column_schemas_and_idxs(table_schema,
                                                   field_or_var_list))) {
     LOG_WARN("fail to init column schemas and idxs", KR(ret));
-  } else if (OB_FAIL(datum_row_.init(table_schema->get_column_count(),
-                                     tenant_id))) {
+  } else if (OB_FAIL(datum_row_.init(table_schema->get_column_count()))) {
     LOG_WARN("fail to init datum row", KR(ret));
   } else {
     column_count_ = table_schema->get_column_count();
     collation_type_ = table_schema->get_collation_type();
-    cast_allocator_.set_tenant_id(tenant_id);
+    cast_allocator_.set_tenant_id(MTL_ID());
     is_inited_ = true;
   }
   return ret;
@@ -596,8 +595,7 @@ ObLoadExternalSort::ObLoadExternalSort()
 ObLoadExternalSort::~ObLoadExternalSort() { external_sort_.clean_up(); }
 
 int ObLoadExternalSort::init(const ObTableSchema *table_schema,
-                             int64_t mem_size, int64_t file_buf_size,
-                             int tenant_id) {
+                             int64_t mem_size, int64_t file_buf_size) {
   int ret = OB_SUCCESS;
   lock_.lock();
   if (IS_INIT) {
@@ -610,7 +608,7 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema,
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("invalid args", KR(ret), KP(table_schema));
   } else {
-    allocator_.set_tenant_id(tenant_id);
+    allocator_.set_tenant_id(MTL_ID());
     const int64_t rowkey_column_num = table_schema->get_rowkey_column_num();
     ObArray<ObColDesc> multi_version_column_descs;
     if (OB_FAIL(table_schema->get_multi_version_column_descs(
@@ -692,8 +690,7 @@ ObLoadSSTableWriter::ObLoadSSTableWriter()
 
 ObLoadSSTableWriter::~ObLoadSSTableWriter() {}
 
-int ObLoadSSTableWriter::init(const ObTableSchema *table_schema,
-                              int tenant_id) {
+int ObLoadSSTableWriter::init(const ObTableSchema *table_schema) {
   int ret = OB_SUCCESS;
   lock_.lock();
   if (IS_INIT) {
@@ -718,7 +715,7 @@ int ObLoadSSTableWriter::init(const ObTableSchema *table_schema,
     if (OB_ISNULL(location_service = GCTX.location_service_)) {
       ret = OB_ERR_SYS;
       LOG_WARN("location service is null", KR(ret), KP(location_service));
-    } else if (OB_FAIL(location_service->get(tenant_id, tablet_id_, INT64_MAX,
+    } else if (OB_FAIL(location_service->get(MTL_ID(), tablet_id_, INT64_MAX,
                                              is_cache_hit, ls_id_))) {
       LOG_WARN("fail to get ls id", KR(ret), K(tablet_id_));
     } else if (OB_ISNULL(ls_service = MTL(ObLSService *))) {
@@ -1013,7 +1010,7 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
   // init csv_parser_
   else if (OB_FAIL(csv_parser_.init(load_stmt.get_data_struct_in_file(),
                                     field_or_var_list.count(),
-                                    load_args.file_cs_type_, tenant_id))) {
+                                    load_args.file_cs_type_))) {
     LOG_WARN("fail to init csv parser", KR(ret));
   }
   // init file_reader_
@@ -1021,22 +1018,21 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to open file", KR(ret), K(load_args.full_file_path_));
   }
   // init buffer_
-  else if (OB_FAIL(buffer_.create(FILE_BUFFER_SIZE, tenant_id))) {
+  else if (OB_FAIL(buffer_.create(FILE_BUFFER_SIZE))) {
     LOG_WARN("fail to create buffer", KR(ret));
   }
   // init row_caster_
   else if (OB_FAIL(
-               row_caster_.init(table_schema, field_or_var_list, tenant_id))) {
+               row_caster_.init(table_schema, field_or_var_list))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init external_sort_
   else if (OB_FAIL(external_sort_.init(
-               table_schema, MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, tenant_id))) {
+               table_schema, MEM_BUFFER_SIZE, FILE_BUFFER_SIZE))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init sstable_writer_
-  else if (OB_FAIL(sstable_writer_->init(table_schema,
-                                                              tenant_id))) {
+  else if (OB_FAIL(sstable_writer_->init(table_schema))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
   return ret;

@@ -17,8 +17,7 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
   if (NULL == buf || buf_size < (sizeof(*task))) {
     LOG_WARN("invalid argument", KP(buf), K(buf_size));
   } else {
-    task = new (buf) ObLoadDataDirectTask(ctx_, stmt_, offset_,end_, obt_, 
-        //external_sort_, 
+    task = new (buf) ObLoadDataDirectTask(ctx_, stmt_, offset_,end_, 
         sstable_writer_, processed_, load_direct_);
   }
   return task;
@@ -26,7 +25,6 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
 
 int ObLoadDataDirectTask::process() {
   int ret = OB_SUCCESS;
-  share::ObTenantEnv::set_tenant(obt_);
   if (OB_FAIL(prepare())) {
     LOG_WARN("prepare error", K(ret));
   } else{
@@ -48,7 +46,6 @@ int ObLoadDataDirectTask::prepare() {
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("allocate memory failed", K(ret));
   } else if (OB_FAIL(load_direct_->init(stmt_, offset_, end_,processed_,
-          //external_sort_, 
           sstable_writer_))) {
     LOG_WARN("failed to execute load data stmt", K(ret));
     //load_direct_->~ObLoadDataDirectDemo();

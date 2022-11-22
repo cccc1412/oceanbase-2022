@@ -1,6 +1,6 @@
 SET GLOBAL secure_file_priv = "";
 SET GLOBAL ob_query_timeout=36000000000;
-load data infile "/home/nxz/Data/lineitem.tbl.simple.shuf" into table lineitem_bulk fields terminated by "|";
+load data infile "/home/nxz/Data/lineitem.tbl.test.shuf" into table lineitem_bulk fields terminated by "|";
 load data infile "/home/nxz/Data/lineitem.tbl.simple" into table lineitem_bulk2 fields terminated by "|";
 select count(*) from lineitem_bulk;
 drop table lineitem_bulk;

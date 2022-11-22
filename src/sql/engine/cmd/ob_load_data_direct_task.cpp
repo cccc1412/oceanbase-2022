@@ -19,7 +19,7 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
   } else {
     task =
         new (buf) ObLoadDataDirectTask(ctx_, stmt_, offset_, end_, processed_,
-                                       external_sort_, sstable_writer_);
+                                       external_sort_, sstable_writer_,index_);
   }
   return task;
 }
@@ -33,6 +33,8 @@ int ObLoadDataDirectTask::process() {
   } else if (OB_FAIL(load_direct->init(stmt_, offset_, end_, processed_,
                                        external_sort_, sstable_writer_))) {
     LOG_WARN("failed to execute load data stmt", K(ret));
+  } else if (processed_ && OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
+    LOG_WARN("failed to init macro block writer", K(ret));
   } else {
     if (OB_FAIL(load_direct->execute(ctx_, stmt_))) {
       LOG_WARN("failed to execute load data stmt", K(ret));

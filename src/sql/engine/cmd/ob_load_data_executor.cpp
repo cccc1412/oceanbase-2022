@@ -96,7 +96,7 @@ int ObLoadDataExecutor::do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
   } else {
     for (int i = 0; i < IO_THREAD_NUM; i++) {
       ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, true, &external_sort,
-                                  &sstable_writer);
+                                  &sstable_writer,i);
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
         goto out;
@@ -104,7 +104,7 @@ int ObLoadDataExecutor::do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
     }
     async_tq.wait_task();
   }
-  if (OB_FAIL(sstable_writer.close())) {
+  if (OB_FAIL(sstable_writer.finish())) {
     LOG_WARN("cannot close sstable", KR(ret));
   }
 out:

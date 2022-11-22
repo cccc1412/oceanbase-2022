@@ -14,10 +14,11 @@ public:
   ObLoadDataDirectTask(ObExecContext &ctx, ObLoadDataStmt &stmt, int64_t offset,
                        int64_t end, bool processed,
                        ObLoadExternalSort *external_sort,
-                       ObLoadSSTableWriter *sstable_writer)
+                       ObLoadSSTableWriter *sstable_writer,
+                       int64_t index=0)
       : ctx_(ctx), stmt_(stmt), offset_(offset), end_(end),
         processed_(processed),
-        external_sort_(external_sort), sstable_writer_(sstable_writer){};
+        external_sort_(external_sort), sstable_writer_(sstable_writer),index_(index){};
   virtual int process() override;
   virtual int64_t get_deep_copy_size() const override {return sizeof(ObLoadDataDirectTask);};
   virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override;
@@ -29,6 +30,7 @@ private:
   bool processed_;
   ObLoadExternalSort *external_sort_;
   ObLoadSSTableWriter *sstable_writer_;
+  int64_t index_;
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataDirectTask);
 };
 

@@ -158,6 +158,7 @@ public:
   ~ObLoadExternalSort();
   int init(const share::schema::ObTableSchema *table_schema, int64_t mem_size,
            int64_t file_buf_size);
+  bool is_inited() {return ATOMIC_LOAD(&is_inited_);}
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   int get_next_row(const ObLoadDatumRow *&datum_row);
@@ -178,15 +179,16 @@ public:
   ObLoadSSTableWriter();
   ~ObLoadSSTableWriter();
   int init(const share::schema::ObTableSchema *table_schema);
+  bool is_inited() { return ATOMIC_LOAD(&is_inited_); }
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
-  void lock() { lock_.lock(); }
-  void unlock() { lock_.unlock(); }
+  int finish();
+  int init_macro_block_writer(const int64_t parallel_idx);
 
 private:
   int init_sstable_index_builder(
       const share::schema::ObTableSchema *table_schema);
-  int init_macro_block_writer(const share::schema::ObTableSchema *table_schema);
+  int init_data_store_desc(const share::schema::ObTableSchema *table_schema);
   int create_sstable();
 
 private:
@@ -200,11 +202,11 @@ private:
   storage::ObITable::TableKey table_key_;
   blocksstable::ObSSTableIndexBuilder sstable_index_builder_;
   blocksstable::ObDataStoreDesc data_store_desc_;
-  blocksstable::ObMacroBlockWriter macro_block_writer_;
-  blocksstable::ObDatumRow datum_row_;
-  bool is_closed_;
+  static thread_local blocksstable::ObMacroBlockWriter macro_block_writer_;
+  static thread_local blocksstable::ObDatumRow datum_row_;
+  static thread_local bool is_closed_;
   bool is_inited_;
-  common::ObSpinLock lock_;
+  bool is_finished_;
 };
 
 class ObLoadDataDirectDemo : public ObLoadDataBase {
@@ -224,9 +226,9 @@ private:
 
 private: 
   bool processed_;
-  ObLoadCSVPaser csv_parser_;
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
+  ObLoadCSVPaser csv_parser_;
   ObLoadRowCaster row_caster_;
   ObLoadExternalSort* external_sort_;
   ObLoadSSTableWriter* sstable_writer_;

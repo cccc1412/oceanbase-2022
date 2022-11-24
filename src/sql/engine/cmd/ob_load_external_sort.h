@@ -406,15 +406,15 @@ int MyExternalSortRound<T, Compare>::clean_up()
   //}
 
 
-  for (int64_t i = 0; i < g_iters_.count(); ++i) {
-    if (NULL != iters_[i]) {
-      if (common::OB_SUCCESS != (tmp_ret = g_iters_[i]->clean_up())) {
-        STORAGE_LOG(WARN, "fail to do reader clean up", K(tmp_ret), K(i));
-        ret = (common::OB_SUCCESS == ret) ? tmp_ret : ret;
-      }
-      g_iters_[i]->~ObFragmentIterator();
-    }
-  }
+  //for (int64_t i = 0; i < g_iters_.count(); ++i) {
+  //  if (NULL != iters_[i]) {
+  //    if (common::OB_SUCCESS != (tmp_ret = g_iters_[i]->clean_up())) {
+  //      STORAGE_LOG(WARN, "fail to do reader clean up", K(tmp_ret), K(i));
+  //      ret = (common::OB_SUCCESS == ret) ? tmp_ret : ret;
+  //    }
+  //    g_iters_[i]->~ObFragmentIterator();
+  //  }
+  //}
 
   if (common::OB_SUCCESS != (tmp_ret = writer_.sync())) {
     STORAGE_LOG(WARN, "fail to do writer finish", K(tmp_ret));
@@ -423,7 +423,8 @@ int MyExternalSortRound<T, Compare>::clean_up()
   is_inited_ = false;
   merge_count_ = 0;
   file_buf_size_ = 0;
-  //iters_.reset();
+  iters_.reset();
+  g_iters_.reset();
   expire_timestamp_ = 0;
   compare_ = NULL;
   merger_.reset();

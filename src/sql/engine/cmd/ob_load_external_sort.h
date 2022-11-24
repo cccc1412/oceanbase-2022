@@ -395,6 +395,7 @@ int MyExternalSortRound<T, Compare>::clean_up()
     STORAGE_LOG(WARN, "MyExternalSortRound has not been inited", K(ret));
   }
 
+  //这里clean up有问题，不知道为什么
   //for (int64_t i = 0; i < iters_.count(); ++i) {
   //  if (NULL != iters_[i]) {
   //    if (common::OB_SUCCESS != (tmp_ret = iters_[i]->clean_up())) {
@@ -421,13 +422,13 @@ int MyExternalSortRound<T, Compare>::clean_up()
     ret = (common::OB_SUCCESS == ret) ? tmp_ret : ret;
   }
   is_inited_ = false;
-  merge_count_ = 0;
-  file_buf_size_ = 0;
+  //merge_count_ = 0;
+  //file_buf_size_ = 0;
   iters_.reset();
-  g_iters_.reset();
-  expire_timestamp_ = 0;
-  compare_ = NULL;
-  merger_.reset();
+  //g_iters_.reset();
+  //expire_timestamp_ = 0;
+  //compare_ = NULL;
+  //merger_.reset();
   allocator_.reset();
   return ret;
 }
@@ -924,12 +925,12 @@ template<typename T, typename Compare>
 void MyExternalSort<T, Compare>::clean_up()
 {
   int tmp_ret = common::OB_SUCCESS;
-  is_inited_ = false;
-  file_buf_size_ = 0;
-  buf_mem_limit_ = 0;
-  expire_timestamp_ = 0;
-  merge_count_per_round_ = 0;
-  compare_ = NULL;
+  //is_inited_ = false;
+  //file_buf_size_ = 0;
+  //buf_mem_limit_ = 0;
+  //expire_timestamp_ = 0;
+  //merge_count_per_round_ = 0;
+  //compare_ = NULL;
   memory_sort_round_.reset();
   curr_round_ = NULL;
   next_round_ = NULL;

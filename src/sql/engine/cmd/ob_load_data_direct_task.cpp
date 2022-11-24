@@ -33,7 +33,8 @@ int ObLoadDataDirectTask::process() {
     if(OB_FAIL(load_direct_->execute(ctx_, stmt_))){
       LOG_WARN("failed to execute load data stmt", K(ret));
     }
-    //load_direct_->~ObLoadDataDirectDemo();
+    load_direct_->~ObLoadDataDirectDemo();
+    ctx_.get_allocator().free(load_direct_);
     load_direct_ = nullptr;
   }
   return ret;
@@ -44,9 +45,9 @@ int ObLoadDataDirectTask::prepare() {
   if (load_direct_)
     return ret;
   //allocator_.set_tenant_id(MTL_ID());
-  //if (OB_ISNULL(load_direct_ =
-  //                  OB_NEWx(ObLoadDataDirectDemo, allocator_))) {
-  if(OB_ISNULL(load_direct_ = new ObLoadDataDirectDemo)){
+  if (OB_ISNULL(load_direct_ =
+                    OB_NEWx(ObLoadDataDirectDemo, (&ctx_.get_allocator())))){
+  //if(OB_ISNULL(load_direct_ = new ObLoadDataDirectDemo)){
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("allocate memory failed", K(ret));
   } else if (OB_FAIL(load_direct_->init(stmt_, offset_, end_,processed_,

@@ -67,6 +67,7 @@ void oceanbase::sql::ObLoadDataDirectTaskQueue::run2() {
         } else {
           ObThreadCondGuard guard(cnt_cond_);
           submit_cnt_++;
+          LOG_INFO("load task finish: ", KP(submit_cnt_), KP(task_cnt_));
           cnt_cond_.broadcast();
         }
         if (!rescheduled) {
@@ -84,6 +85,7 @@ int oceanbase::sql::ObLoadDataDirectTaskQueue::wait_all_task() {
   int ret = OB_SUCCESS;
   ObThreadCondGuard guard(cnt_cond_);
   while(submit_cnt_ != task_cnt_) { //todo
+    LOG_INFO("wating load task", K(submit_cnt_), K(task_cnt_));
     cnt_cond_.wait();
   }
   return ret;

@@ -2,6 +2,8 @@
 
 #include "lib/oblog/ob_log_module.h"
 #include "lib/utility/ob_macro_utils.h"
+#include "share/rc/ob_tenant_base.h"
+#include "sql/engine/cmd/ob_load_data_direct_demo.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/ob_exec_context.h"
 
@@ -41,8 +43,10 @@ int ObLoadDataDirectTask::prepare() {
   int ret = OB_SUCCESS;
   if (load_direct_)
     return ret;
-  if (OB_ISNULL(load_direct_ =
-                    OB_NEWx(ObLoadDataDirectDemo, (&ctx_.get_allocator())))) {
+  //allocator_.set_tenant_id(MTL_ID());
+  //if (OB_ISNULL(load_direct_ =
+  //                  OB_NEWx(ObLoadDataDirectDemo, allocator_))) {
+  if(OB_ISNULL(load_direct_ = new ObLoadDataDirectDemo)){
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("allocate memory failed", K(ret));
   } else if (OB_FAIL(load_direct_->init(stmt_, offset_, end_,processed_,

@@ -34,7 +34,7 @@ public:
       const uint64_t tenant_id, Compare *compare);
   bool is_inited() const { return is_inited_; }
   int add_item(const T &item);
-  int build_fragment();
+  int build_fragment(bool is_g);
   int do_merge(MyExternalSortRound &next_round);
   int do_one_run(const int64_t start_reader_idx, MyExternalSortRound &next_round);
   int finish_write();
@@ -42,6 +42,7 @@ public:
   int build_merger();
   int get_next_item(const T *&item);
   int64_t get_fragment_count();
+  int set_g_iter_to_local();
   int add_fragment_iter(ObFragmentIterator<T> *iter);
   int transfer_final_sorted_fragment_iter(MyExternalSortRound &dest_round);
 private:
@@ -53,7 +54,8 @@ private:
   bool is_inited_;
   int64_t merge_count_;
   int64_t file_buf_size_;
-  static FragmentIteratorList iters_;
+  FragmentIteratorList iters_; 
+  static FragmentIteratorList g_iters_;
   static common::ObSpinLock iters_lock_;
   FragmentWriter writer_;
   int64_t expire_timestamp_;
@@ -72,9 +74,19 @@ ObFragmentMerge<T, Compare> MyExternalSortRound<T,Compare>::merger_;
 
 
 template<typename T, typename Compare>
-common::ObArray<ObFragmentIterator<T> *> MyExternalSortRound<T,Compare>::iters_;
+common::ObArray<ObFragmentIterator<T> *> MyExternalSortRound<T,Compare>::g_iters_;
 template<typename T, typename Compare>
 common::ObSpinLock MyExternalSortRound<T,Compare>::iters_lock_;
+
+
+template<typename T, typename Compare>
+int MyExternalSortRound<T,Compare>::set_g_iter_to_local() {
+  int len = g_iters_.count();
+  for(int i = 0; i < len; i++) {
+    iters_.push_back(g_iters_[i]);
+  }
+  return 0;
+}
 
 template<typename T, typename Compare>
 MyExternalSortRound<T, Compare>::MyExternalSortRound()
@@ -135,7 +147,7 @@ int MyExternalSortRound<T, Compare>::add_item(const T &item)
     ret = common::OB_TIMEOUT;
     STORAGE_LOG(WARN, "MyExternalSortRound timeout", K(ret), K(expire_timestamp_));
   } else if (!is_writer_opened_ && OB_FAIL(writer_.open(file_buf_size_,
-      expire_timestamp_, tenant_id_, dir_id_ + GETTID()) )) {
+      expire_timestamp_, tenant_id_, dir_id_ + GETTID()) )) { 
     STORAGE_LOG(WARN, "fail to open writer", K(ret), K_(tenant_id), K_(dir_id));
   } else {
     is_writer_opened_ = true;
@@ -147,7 +159,7 @@ int MyExternalSortRound<T, Compare>::add_item(const T &item)
 }
 
 template<typename T, typename Compare>
-int MyExternalSortRound<T, Compare>::build_fragment()
+int MyExternalSortRound<T, Compare>::build_fragment(bool is_g)
 {
   int ret = common::OB_SUCCESS;
   void *buf = NULL;
@@ -170,14 +182,23 @@ int MyExternalSortRound<T, Compare>::build_fragment()
       STORAGE_LOG(WARN, "fail to open reader", K(ret), K(file_buf_size_),
           K(expire_timestamp_));
     } else {
-      iters_lock_.lock();
-      if(OB_FAIL(iters_.push_back(reader))) {
-        iters_lock_.unlock();
-        STORAGE_LOG(WARN, "fail to push back reader", K(ret));
-      } else {
-        iters_lock_.unlock();
-        writer_.reset();
-        is_writer_opened_ = false;
+      if(is_g) {
+        iters_lock_.lock();
+        if(OB_FAIL(g_iters_.push_back(reader))) {
+          iters_lock_.unlock();
+          STORAGE_LOG(WARN, "fail to push back reader", K(ret));
+        } else {
+          iters_lock_.unlock();
+          writer_.reset();
+          is_writer_opened_ = false;
+        }
+      }else {
+        if(OB_FAIL(iters_.push_back(reader))) {
+          STORAGE_LOG(WARN, "fail to push back reader", K(ret));
+        } else {
+          writer_.reset();
+          is_writer_opened_ = false;
+        }
       }
     }
   }
@@ -319,7 +340,7 @@ int MyExternalSortRound<T, Compare>::do_one_run(
     }
 
     if (OB_SUCC(ret)) {
-      if (OB_FAIL(next_round.build_fragment())) {
+      if (OB_FAIL(next_round.build_fragment(false))) { //这里会生成新的临时文件，加入iters_
         STORAGE_LOG(WARN, "fail to build fragment", K(ret));
       }
     }
@@ -374,13 +395,24 @@ int MyExternalSortRound<T, Compare>::clean_up()
     STORAGE_LOG(WARN, "MyExternalSortRound has not been inited", K(ret));
   }
 
-  for (int64_t i = 0; i < iters_.count(); ++i) {
+  //for (int64_t i = 0; i < iters_.count(); ++i) {
+  //  if (NULL != iters_[i]) {
+  //    if (common::OB_SUCCESS != (tmp_ret = iters_[i]->clean_up())) {
+  //      STORAGE_LOG(WARN, "fail to do reader clean up", K(tmp_ret), K(i));
+  //      ret = (common::OB_SUCCESS == ret) ? tmp_ret : ret;
+  //    }
+  //    iters_[i]->~ObFragmentIterator();
+  //  }
+  //}
+
+
+  for (int64_t i = 0; i < g_iters_.count(); ++i) {
     if (NULL != iters_[i]) {
-      if (common::OB_SUCCESS != (tmp_ret = iters_[i]->clean_up())) {
+      if (common::OB_SUCCESS != (tmp_ret = g_iters_[i]->clean_up())) {
         STORAGE_LOG(WARN, "fail to do reader clean up", K(tmp_ret), K(i));
         ret = (common::OB_SUCCESS == ret) ? tmp_ret : ret;
       }
-      iters_[i]->~ObFragmentIterator();
+      g_iters_[i]->~ObFragmentIterator();
     }
   }
 
@@ -538,7 +570,7 @@ int MyMemorySortRound<T, Compare>::build_fragment()
     }
 
     if (OB_SUCC(ret)) {
-      if (OB_FAIL(next_round_->build_fragment())) {
+      if (OB_FAIL(next_round_->build_fragment(true))) {
         STORAGE_LOG(WARN, "fail to build fragment", K(ret));
       } else {
         const int64_t write_fragment_time = common::ObTimeUtility::current_time() - start;
@@ -696,11 +728,12 @@ private:
 public:
   MemorySortRound memory_sort_round_;
 private:
-  static ExternalSortRound sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
-  static ExternalSortRound *curr_round_;
-  static ExternalSortRound *next_round_;
+  ExternalSortRound sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
+  ExternalSortRound *curr_round_;
+  ExternalSortRound *next_round_;
 public:  
   bool is_empty_;
+  static ExternalSortRound *round_result_;
 private:
   uint64_t tenant_id_;
 };
@@ -720,20 +753,22 @@ int64_t MyExternalSort<T, Compare>::merge_count_per_round_;
 template<typename T, typename Compare>
 Compare* MyExternalSort<T, Compare>::compare_;
 
+template<typename T, typename Compare>
+MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::round_result_;
 
 
 
 //template<typename T, typename Compare>
 //MyExternalSortRound<T, Compare> MyExternalSort<T, Compare>::memory_sort_round_; 
 
-template<typename T, typename Compare>
-MyExternalSortRound<T, Compare> MyExternalSort<T, Compare>::sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
-
-template<typename T, typename Compare>
-MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::curr_round_;
-
-template<typename T, typename Compare>
-MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::next_round_;
+//template<typename T, typename Compare>
+//MyExternalSortRound<T, Compare> MyExternalSort<T, Compare>::sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
+//
+//template<typename T, typename Compare>
+//MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::curr_round_;
+//
+//template<typename T, typename Compare>
+//MyExternalSortRound<T, Compare>* MyExternalSort<T, Compare>::next_round_;
 
 template<typename T, typename Compare>
 MyExternalSort<T, Compare>::MyExternalSort()
@@ -821,12 +856,15 @@ int MyExternalSort<T, Compare>::do_sort(const bool final_merge)
   } else if (memory_sort_round_.has_data() && memory_sort_round_.is_in_memory()) {
     STORAGE_LOG(INFO, "all data sorted in memory");
     is_empty_ = false;
-  } else if (0 == curr_round_->get_fragment_count()) {
-    is_empty_ = true;
-    ret = common::OB_SUCCESS;
+  //} else if (0 == curr_round_->get_fragment_count()) {
+  //  is_empty_ = true;
+  //  ret = common::OB_SUCCESS;
   } else {
     // final_merge = true is for performance optimization, the count of fragments is reduced to lower than merge_count_per_round,
     // then the last round of merge this fragment is skipped
+    curr_round_ = &sort_rounds_[0];
+    next_round_ = &sort_rounds_[1];
+    curr_round_->set_g_iter_to_local();
     const int64_t final_round_limit = final_merge ? merge_count_per_round_ : 1;
     int64_t round_id = 1;
     is_empty_ = false;
@@ -853,6 +891,7 @@ int MyExternalSort<T, Compare>::do_sort(const bool final_merge)
         STORAGE_LOG(WARN, "fail to build merger", K(ret));
       }
     }
+    round_result_ = curr_round_;
   }
   return ret;
 }
@@ -872,7 +911,7 @@ int MyExternalSort<T, Compare>::get_next_item(const T *&item)
         STORAGE_LOG(WARN, "fail to get next item", K(ret));
       }
     }
-  } else if (OB_FAIL(curr_round_->get_next_item(item))) {
+  } else if (OB_FAIL(round_result_->get_next_item(item))) {
     if (common::OB_ITER_END != ret) {
       STORAGE_LOG(WARN, "fail to get next item", K(ret));
     }

@@ -23,6 +23,7 @@ public:
   virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override;
 private:
   int prepare();
+  //common::ObArenaAllocator allocator_;
   ObExecContext &ctx_;
   ObLoadDataStmt &stmt_;
   int64_t offset_;

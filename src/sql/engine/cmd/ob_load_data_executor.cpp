@@ -39,14 +39,16 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   ObLoadDataDirectTaskQueue async_tq2;
   async_tq.set_run_wrapper(MTL_CTX());
   async_tq2.set_run_wrapper(MTL_CTX());
-  async_tq.init(1, 1 << 10, "ObLoadDataExe");
-  async_tq2.init(1, 1<<10,"ObLoadDataExe2");
+  async_tq.init(10, 1 << 10, "ObLoadDataExe");
+  async_tq2.init(1, 1 << 10,"ObLoadDataExe2");
 
   struct stat st;
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
    return OB_FILE_NOT_OPENED;
   } else {
     ObLoadDataDirectDemo *virtual_load_direct_ = OB_NEWx(ObLoadDataDirectDemo, (&ctx.get_allocator()));
+    virtual_load_direct_->init(stmt, -1, -1, false,
+          &sstable_writer);
     virtual_load_direct_->external_sort_.is_inited_ = true;
     virtual_load_direct_->external_sort_.external_sort_.is_inited_ = true;
     virtual_load_direct_->external_sort_.external_sort_.memory_sort_round_.is_inited_ = true;

@@ -37,6 +37,8 @@ struct ObExternalSortConstant
   static const int64_t MIN_MEMORY_LIMIT = 8 * 1024LL * 1024LL;// min memory limit is 8m
   static const int64_t DEFAULT_FILE_READ_WRITE_BUFFER = 2 * 1024 * 1024LL; // 2m
   static const int64_t MIN_MULTIPLE_MERGE_COUNT = 2;
+
+  static const int64_t PARALLEL_SPILT_SIZE = 1L * 1024LL * 1024LL * 128L;
   static inline int get_io_timeout_ms(const int64_t expire_timestamp, int64_t &wait_time_ms);
   static inline bool is_timeout(const int64_t expire_timestamp);
 };
@@ -95,6 +97,7 @@ public:
   void assign(const int64_t buf_pos, const int64_t buf_cap, char *buf);
   int serialize_header();
   bool has_item();
+  int64_t size();
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_cap_));
 private:
   char *buf_;
@@ -157,6 +160,10 @@ bool ObMacroBufferWriter<T>::has_item()
   return buf_pos_ > ObExternalSortConstant::BUF_HEADER_LENGTH;
 }
 
+template <typename T> int64_t ObMacroBufferWriter<T>::size() {
+  return buf_pos_;
+}
+
 template<typename T>
 class ObFragmentWriterV2
 {
@@ -187,7 +194,13 @@ private:
   int64_t fd_;
   int64_t dir_id_;
   uint64_t tenant_id_;
+  int64_t current_size_;
+  common::ObArray<int64_t> parallel_start_offsets_;
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
+public:
+  const common::ObArray<int64_t> &parallel_start_offsets() {
+    return parallel_start_offsets_;
+  }
 };
 
 template<typename T>
@@ -195,7 +208,7 @@ ObFragmentWriterV2<T>::ObFragmentWriterV2()
   : is_inited_(false), buf_(NULL), buf_size_(0), expire_timestamp_(0),
     allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
     macro_buffer_writer_(), has_sample_item_(false), sample_item_(),
-    file_io_handle_(), fd_(-1), dir_id_(-1), tenant_id_(common::OB_INVALID_ID)
+    file_io_handle_(), fd_(-1), dir_id_(-1), tenant_id_(common::OB_INVALID_ID), current_size_(0), parallel_start_offsets_()
 {
 }
 
@@ -219,10 +232,14 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size, const int64_t expire_tim
       || common::OB_INVALID_ID == tenant_id) {
     ret = common::OB_INVALID_ARGUMENT;
     STORAGE_LOG(WARN, "invalid argument", K(ret), K(buf_size), K(expire_timestamp));
+  } else if (OB_FAIL(parallel_start_offsets_.reserve(128))) {
+    STORAGE_LOG(WARN, "fail to reserve space", K(ret));
   } else {
     dir_id_ = dir_id;
-    const int64_t align_buf_size = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
-    if (NULL == (buf_ = static_cast<char *>(allocator_.alloc(align_buf_size)))) {
+    const int64_t align_buf_size = common::lower_align(
+        buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
+    if (NULL ==
+        (buf_ = static_cast<char *>(allocator_.alloc(align_buf_size)))) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to allocate buffer", K(ret), K(align_buf_size));
     } else if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.open(fd_, dir_id_))) {
@@ -230,7 +247,8 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size, const int64_t expire_tim
     } else {
       buf_size_ = align_buf_size;
       expire_timestamp_ = expire_timestamp;
-      macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, buf_);
+      macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH,
+                                  buf_size_, buf_);
       has_sample_item_ = false;
       tenant_id_ = tenant_id;
       is_inited_ = true;
@@ -313,7 +331,27 @@ int ObFragmentWriterV2<T>::flush_buffer()
     if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
       STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
     } else {
-      macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, buf_);
+      int64_t size = macro_buffer_writer_.size();
+      if (size + current_size_ > ObExternalSortConstant::PARALLEL_SPILT_SIZE) {
+        if (parallel_start_offsets_.size() == 0 &&
+            OB_FAIL(parallel_start_offsets_.push_back(0))) {
+          STORAGE_LOG(WARN, "failed to push back offset", K(ret));
+        } else{
+          int64_t pre_offset=parallel_start_offsets_.at(parallel_start_offsets_.size()-1);
+          if (OB_FAIL(parallel_start_offsets_.push_back(pre_offset +
+                                                        current_size_))) {
+            STORAGE_LOG(WARN, "failed to push back offset", K(ret));
+          } else {
+            current_size_ = size;
+            macro_buffer_writer_.assign(
+                ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, buf_);
+          }
+        }
+      } else {
+        current_size_ += size;
+        macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH,
+                                    buf_size_, buf_);
+      } 
     }
   }
   return ret;
@@ -362,6 +400,8 @@ void ObFragmentWriterV2<T>::reset()
   fd_ = -1;
   dir_id_ = -1;
   tenant_id_ = common::OB_INVALID_ID;
+  current_size_=0;
+  parallel_start_offsets_.reuse();
 }
 
 template<typename T>
@@ -442,8 +482,12 @@ class ObFragmentReaderV2 : public ObFragmentIterator<T>
 public:
   ObFragmentReaderV2();
   virtual ~ObFragmentReaderV2();
-  int init(const int64_t fd, const int64_t dir_id, const int64_t expire_timestamp,
-      const uint64_t tenant_id, const T &sample_item, const int64_t buf_size);
+  int init(const int64_t fd, const int64_t dir_id,
+           const int64_t expire_timestamp, const uint64_t tenant_id,
+           const T &sample_item, const int64_t buf_size,
+           const common::ObArray<int64_t> &parallel_start_offsets);
+  // int64_t start_=0;
+  // int64_t end_=-1;
   int open();
   virtual int get_next_item(const T *&item);
   virtual int clean_up();
@@ -469,18 +513,26 @@ private:
   bool is_prefetch_end_;
   int64_t buf_size_;
   bool is_first_prefetch_;
+  int64_t current_size_;
+  common::ObArray<int64_t> parallel_start_offsets_;
+
+public:
+  const common::ObArray<int64_t> &parallel_start_offsets() {
+    return parallel_start_offsets_;
+  }
 };
 
-template<typename T>
+template <typename T>
 ObFragmentReaderV2<T>::ObFragmentReaderV2()
-  : is_inited_(false), expire_timestamp_(0),
-    allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
-    sample_allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, OB_MALLOC_NORMAL_BLOCK_SIZE),
-    macro_buffer_reader_(), fd_(-1), dir_id_(-1), curr_item_(),
-    file_io_handles_(), handle_cursor_(-1), buf_(NULL), tenant_id_(common::OB_INVALID_ID),
-    is_prefetch_end_(false), buf_size_(0), is_first_prefetch_(true)
-{
-}
+    : is_inited_(false), expire_timestamp_(0),
+      allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
+                 common::OB_MALLOC_BIG_BLOCK_SIZE),
+      sample_allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
+                        OB_MALLOC_NORMAL_BLOCK_SIZE),
+      macro_buffer_reader_(), fd_(-1), dir_id_(-1), curr_item_(),
+      file_io_handles_(), handle_cursor_(-1), buf_(NULL),
+      tenant_id_(common::OB_INVALID_ID), is_prefetch_end_(false), buf_size_(0),
+      is_first_prefetch_(true), current_size_ (0){}
 
 template <typename T>
 ObFragmentReaderV2<T>::~ObFragmentReaderV2()
@@ -488,10 +540,11 @@ ObFragmentReaderV2<T>::~ObFragmentReaderV2()
   reset();
 }
 
-template<typename T>
-int ObFragmentReaderV2<T>::init(const int64_t fd, const int64_t dir_id, const int64_t expire_timestamp,
-    const uint64_t tenant_id, const T &sample_item, const int64_t buf_size)
-{
+template <typename T>
+int ObFragmentReaderV2<T>::init(
+    const int64_t fd, const int64_t dir_id, const int64_t expire_timestamp,
+    const uint64_t tenant_id, const T &sample_item, const int64_t buf_size,
+    const common::ObArray<int64_t> &parallel_start_offsets) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(is_inited_)) {
     ret = common::OB_INIT_TWICE;
@@ -513,6 +566,9 @@ int ObFragmentReaderV2<T>::init(const int64_t fd, const int64_t dir_id, const in
     } else if (OB_FAIL(curr_item_.deep_copy(
             sample_item, buf, buf_len, pos))) {
       STORAGE_LOG(WARN, "failed to deep copy item", K(ret));
+    } else if (OB_FAIL(
+                   parallel_start_offsets_.assign(parallel_start_offsets))) {
+      STORAGE_LOG(WARN, "fail to assign parallel_start_offsets", K(ret));
     } else {
       expire_timestamp_ = expire_timestamp;
       handle_cursor_ = 0;
@@ -673,6 +729,8 @@ void ObFragmentReaderV2<T>::reset()
   is_prefetch_end_ = false;
   buf_size_ = 0;
   is_first_prefetch_ = true;
+  current_size_=0;
+  parallel_start_offsets_.reset();
 }
 
 template<typename T>
@@ -1114,7 +1172,7 @@ int ObExternalSortRound<T, Compare>::build_fragment()
   } else {
     STORAGE_LOG(INFO, "build fragment", K(writer_.get_fd()), K(writer_.get_sample_item()));
     if (OB_FAIL(reader->init(writer_.get_fd(), writer_.get_dir_id(), expire_timestamp_, tenant_id_,
-        writer_.get_sample_item(), file_buf_size_))) {
+        writer_.get_sample_item(), file_buf_size_,writer_.parallel_start_offsets()))) {
       STORAGE_LOG(WARN, "fail to open reader", K(ret), K(file_buf_size_),
           K(expire_timestamp_));
     } else if (OB_FAIL(iters_.push_back(reader))) {

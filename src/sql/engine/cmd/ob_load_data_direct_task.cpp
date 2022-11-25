@@ -33,7 +33,7 @@ int ObLoadDataDirectTask::process() {
     if(OB_FAIL(load_direct_->execute(ctx_, stmt_))){
       LOG_WARN("failed to execute load data stmt", K(ret));
     }
-    load_direct_->~ObLoadDataDirectDemo();
+    //load_direct_->~ObLoadDataDirectDemo();
     ctx_.get_allocator().free(load_direct_);
     load_direct_ = nullptr;
   }
@@ -54,7 +54,7 @@ int ObLoadDataDirectTask::prepare() {
           sstable_writer_))) {
     LOG_WARN("failed to execute load data stmt", K(ret));
     //load_direct_->~ObLoadDataDirectDemo();
-    load_direct_=nullptr;
+    //load_direct_=nullptr;
   }
   return ret;
 }

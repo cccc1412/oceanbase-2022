@@ -21,7 +21,7 @@ oceanbase-ce:
     memory_limit: 14G # The maximum running memory for an observer
     # The reserved system memory. system_memory is reserved for general tenants. The default value is 30G.
     system_memory: 12G
-    datafile_size: 50G # The percentage of the data_dir space to the total disk space. This value takes effect only when datafile_size is 0. The default value is 90.
+    datafile_size: 100G # The percentage of the data_dir space to the total disk space. This value takes effect only when datafile_size is 0. The default value is 90.
     log_disk_size: 10G
     syslog_level: INFO # System log level. The default value is INFO.
     enable_syslog_wf: true # Print system logs whose levels are higher than WARNING to a separate log file. The default value is true.

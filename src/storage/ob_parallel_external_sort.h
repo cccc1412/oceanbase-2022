@@ -85,7 +85,6 @@ public:
   virtual int clean_up() { return common::OB_SUCCESS; }
   virtual int prefetch() {return common::OB_SUCCESS; }
   virtual TO_STRING_KV(K(""));
-  virtual void print() { STORAGE_LOG(WARN, "ObFragmentIterator print"); }
 };
 
 template<typename T>
@@ -538,7 +537,6 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
 template <typename T>
 ObFragmentReaderV2<T>::~ObFragmentReaderV2()
 {
-  STORAGE_LOG(WARN, "~ObFragmentReaderV2() destroy");
   reset();
 }
 
@@ -894,9 +892,7 @@ int ObFragmentMerge<T, Compare>::open()
     STORAGE_LOG(WARN, "ObFragmentMerge has been opened before", K(ret));
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < iters_.count(); ++i) {
-      FragmentIterator* it=iters_.at(i);
-      it->print();
-      if (OB_FAIL(it->prefetch())) {
+      if (OB_FAIL(iters_.at(i)->prefetch())) {
         STORAGE_LOG(WARN, "fail to prefetch", K(ret));
       }
     }
@@ -1055,7 +1051,7 @@ public:
   ObExternalSortRound();
   virtual ~ObExternalSortRound();
   int init(const int64_t merge_count, const int64_t file_buf_size, const int64_t expire_timestamp,
-      const uint64_t tenant_id, Compare *compare);
+      const uint64_t tenant_id, Compare *compare, common::ObArenaAllocator* external_allocator=nullptr);
   bool is_inited() const { return is_inited_; }
   int add_item(const T &item);
   int build_fragment();
@@ -1087,6 +1083,7 @@ private:
   uint64_t tenant_id_;
   int64_t dir_id_;
   bool is_writer_opened_;
+  common::ObArenaAllocator* external_allocator_;
 };
 
 template<typename T, typename Compare>
@@ -1094,7 +1091,7 @@ ObExternalSortRound<T, Compare>::ObExternalSortRound()
   : is_inited_(false), merge_count_(0), file_buf_size_(0), iters_(), writer_(),
     expire_timestamp_(0), compare_(NULL), merger_(),
     allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
-    tenant_id_(common::OB_INVALID_ID), dir_id_(-1), is_writer_opened_(false)
+    tenant_id_(common::OB_INVALID_ID), dir_id_(-1), is_writer_opened_(false),external_allocator_(nullptr)
 {
 }
 
@@ -1106,7 +1103,7 @@ ObExternalSortRound<T, Compare>::~ObExternalSortRound()
 template<typename T, typename Compare>
 int ObExternalSortRound<T, Compare>::init(
     const int64_t merge_count, const int64_t file_buf_size, const int64_t expire_timestamp,
-    const uint64_t tenant_id, Compare *compare)
+    const uint64_t tenant_id, Compare *compare, common::ObArenaAllocator* external_allocator)
 {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(is_inited_)) {
@@ -1131,6 +1128,7 @@ int ObExternalSortRound<T, Compare>::init(
     tenant_id_ = tenant_id;
     is_writer_opened_ = false;
     merger_.reset();
+    external_allocator_=external_allocator;
   }
   return ret;
 }
@@ -1166,7 +1164,8 @@ int ObExternalSortRound<T, Compare>::build_fragment()
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObExternalSortRound has not been inited", K(ret));
-  } else if (OB_ISNULL(buf = allocator_.alloc(sizeof(FragmentReader)))) {
+  } else if (OB_ISNULL(buf =
+                           external_allocator_->alloc(sizeof(FragmentReader)))) {
     ret = common::OB_ALLOCATE_MEMORY_FAILED;
     STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
   } else if (OB_ISNULL(reader = new (buf) FragmentReader())) {
@@ -1200,7 +1199,6 @@ int ObExternalSortRound<T, Compare>::add_fragment_iter(ObFragmentIterator<T> *it
   } else if (OB_FAIL(iters_.push_back(iter))) {
     STORAGE_LOG(WARN, "fail to add iterator", K(ret));
   }
-  iter->print();
   return ret;
 }
 
@@ -1317,7 +1315,6 @@ int ObExternalSortRound<T, Compare>::do_one_run(
     const int64_t end_reader_idx = std::min(start_reader_idx + merge_count_, iters_.count());
     FragmentIteratorList iters;
     for (int64_t i = start_reader_idx; OB_SUCC(ret) && i < end_reader_idx; ++i) {
-      iters_.at(i)->print();
       if (OB_FAIL(iters.push_back(iters_.at(i)))) {
         STORAGE_LOG(WARN, "fail to push back iterator list", K(ret));
       }
@@ -1453,7 +1450,6 @@ ObMemoryFragmentIterator<T>::ObMemoryFragmentIterator()
 template<typename T>
 ObMemoryFragmentIterator<T>::~ObMemoryFragmentIterator()
 {
-  STORAGE_LOG(WARN, "~ObMemoryFragmentIterator() destroy");
 }
 
 template<typename T>
@@ -1730,7 +1726,19 @@ template<typename T, typename Compare>
 int ObMemorySortRound<T, Compare>::transfer_sorted_fragment_iter(
     ExternalSortRound &dest_round)
 {
-  return transfer_final_sorted_fragment_iter(dest_round);
+  int ret = common::OB_SUCCESS;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = common::OB_NOT_INIT;
+    STORAGE_LOG(WARN, "ObMemorySortRound has not been inited", K(ret));
+  } else if (!is_in_memory()) {
+    ret = common::OB_ERR_SYS;
+    STORAGE_LOG(WARN, "ObMemorySortRound has not data", K(ret));
+  } else if (NULL == iter_ && OB_FAIL(build_fragment())) {
+    STORAGE_LOG(WARN, "fail to build fragment", K(ret));
+  } else if (OB_FAIL(next_round_->transfer_sorted_fragment_iter(dest_round))) {
+    STORAGE_LOG(WARN, "fail to add transfer sorted fragment iter", K(ret));
+  }
+  return ret;
 }
 
 template<typename T, typename Compare>
@@ -1762,8 +1770,9 @@ public:
   typedef ObExternalSortRound<T, Compare> ExternalSortRound;
   ObExternalSort();
   virtual ~ObExternalSort();
-  int init(const int64_t mem_limit, const int64_t file_buf_size, const int64_t expire_timestamp,
-      const uint64_t tenant_id, Compare *compare);
+  int init(const int64_t mem_limit, const int64_t file_buf_size,
+           const int64_t expire_timestamp, const uint64_t tenant_id,
+           Compare *compare, common::ObArenaAllocator* allocator=nullptr);
   int add_item(const T &item);
   int do_sort(const bool final_merge);
   int get_next_item(const T *&item);
@@ -1788,26 +1797,28 @@ private:
   ExternalSortRound *next_round_;
   bool is_empty_;
   uint64_t tenant_id_;
+  common::ObArenaAllocator* external_allocator_;
 };
 
-template<typename T, typename Compare>
+template <typename T, typename Compare>
 ObExternalSort<T, Compare>::ObExternalSort()
-  : is_inited_(false), file_buf_size_(0), buf_mem_limit_(0), expire_timestamp_(0), merge_count_per_round_(0),
-    compare_(NULL), memory_sort_round_(), curr_round_(NULL), next_round_(NULL),
-    is_empty_(true), tenant_id_(common::OB_INVALID_ID)
-{
-}
+    : is_inited_(false), file_buf_size_(0), buf_mem_limit_(0),
+      expire_timestamp_(0), merge_count_per_round_(0), compare_(NULL),
+      memory_sort_round_(), curr_round_(NULL), next_round_(NULL),
+      is_empty_(true), tenant_id_(common::OB_INVALID_ID),
+      external_allocator_(nullptr) {}
 
 template<typename T, typename Compare>
 ObExternalSort<T, Compare>::~ObExternalSort()
 {
 }
 
-template<typename T, typename Compare>
-int ObExternalSort<T, Compare>::init(
-    const int64_t mem_limit, const int64_t file_buf_size, const int64_t expire_timestamp,
-    const uint64_t tenant_id, Compare *compare)
-{
+template <typename T, typename Compare>
+int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
+                                     const int64_t file_buf_size,
+                                     const int64_t expire_timestamp,
+                                     const uint64_t tenant_id, Compare *compare,
+                                     common::ObArenaAllocator *external_allocator) {
   int ret = common::OB_SUCCESS;
   int64_t macro_block_size = OB_SERVER_BLOCK_MGR.get_macro_block_size();
   if (OB_UNLIKELY(is_inited_)) {
@@ -1827,6 +1838,7 @@ int ObExternalSort<T, Compare>::init(
     expire_timestamp_ = expire_timestamp;
     merge_count_per_round_ = buf_mem_limit_ / file_buf_size_ / 2;
     compare_ = compare;
+    external_allocator_= external_allocator;
     tenant_id_ = tenant_id;
     curr_round_ = &sort_rounds_[0];
     next_round_ = &sort_rounds_[1];
@@ -1836,10 +1848,11 @@ int ObExternalSort<T, Compare>::init(
       STORAGE_LOG(WARN, "invalid argument, invalid memory limit", K(ret),
           K(buf_mem_limit_), K(file_buf_size_), K(merge_count_per_round_));
     } else if (OB_FAIL(curr_round_->init(merge_count_per_round_, file_buf_size_,
-        expire_timestamp, tenant_id_, compare_))) {
+                                         expire_timestamp, tenant_id_, compare_,
+                                         external_allocator_))) {
       STORAGE_LOG(WARN, "fail to init current sort round", K(ret));
-    } else if (OB_FAIL(memory_sort_round_.init(buf_mem_limit_,
-        expire_timestamp, compare_, curr_round_))) {
+    } else if (OB_FAIL(memory_sort_round_.init(buf_mem_limit_, expire_timestamp,
+                                               compare_, curr_round_))) {
       STORAGE_LOG(WARN, "fail to init memory sort round", K(ret));
     } else {
       is_inited_ = true;
@@ -1886,7 +1899,8 @@ int ObExternalSort<T, Compare>::do_sort(const bool final_merge)
       const int64_t start_time = common::ObTimeUtility::current_time();
       STORAGE_LOG(INFO, "do sort start round", K(round_id));
       if (OB_FAIL(next_round_->init(merge_count_per_round_, file_buf_size_,
-          expire_timestamp_, tenant_id_, compare_))) {
+                                    expire_timestamp_, tenant_id_, compare_,
+                                    external_allocator_))) {
         STORAGE_LOG(WARN, "fail to init next sort round", K(ret));
       } else if (OB_FAIL(curr_round_->do_merge(*next_round_))) {
         STORAGE_LOG(WARN, "fail to do merge fragments of current round", K(ret));

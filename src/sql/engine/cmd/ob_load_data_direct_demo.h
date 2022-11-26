@@ -161,7 +161,6 @@ public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
   int init(const share::schema::ObTableSchema *table_schema);
-  inline bool is_inited() {return ATOMIC_LOAD(&is_inited_);}
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   int finish();
@@ -176,14 +175,14 @@ private:
   static thread_local bool is_closed_;
   bool is_inited_;
   bool is_finished_;
+  common::ObSpinLock lock_;
 };
 
 class ObLoadSSTableWriter {
 public:
   ObLoadSSTableWriter();
   ~ObLoadSSTableWriter();
-  inline int init(const share::schema::ObTableSchema *table_schema);
-  bool is_inited() { return ATOMIC_LOAD(&is_inited_); }
+  int init(const share::schema::ObTableSchema *table_schema);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
   int finish();
@@ -211,6 +210,7 @@ private:
   static thread_local bool is_closed_;
   bool is_inited_;
   bool is_finished_;
+  common::ObSpinLock lock_;
 };
 
 class ObLoadDataDirectDemo : public ObLoadDataBase {

@@ -590,12 +590,13 @@ int ObLoadRowCaster::cast_obj_to_datum(const ObColumnSchemaV2 *column_schema,
 ObLoadExternalSort::ObLoadExternalSort()
     : is_inited_(false), is_finished_(false) {}
 
-ObLoadExternalSort::~ObLoadExternalSort() { external_sort_.clean_up(); }
+ObLoadExternalSort::~ObLoadExternalSort() {}
 
 int ObLoadExternalSort::init(const ObTableSchema *table_schema) {
   int ret = OB_SUCCESS;
+  lock_.lock();
   if (IS_INIT) {
-    ret = OB_INIT_TWICE;
+    ret = OB_SUCCESS;
     LOG_WARN("ObLoadExternalSort init twice", KR(ret), KP(this));
   } else if (OB_UNLIKELY(nullptr == table_schema)) {
     ret = OB_INVALID_ARGUMENT;
@@ -613,13 +614,15 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema) {
       LOG_WARN("fail to init datum utils", KR(ret));
     } else if (OB_FAIL(compare_.init(rowkey_column_num, &datum_utils_))) {
       LOG_WARN("fail to init compare", KR(ret));
-    } else if (OB_FAIL(external_sort_all_.init(MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, 0,
-                                    MTL_ID(), &compare_))) {
+    } else if (OB_FAIL(external_sort_all_.init(MEM_BUFFER_SIZE,
+                                               FILE_BUFFER_SIZE, 0, MTL_ID(),
+                                               &compare_, &allocator_))) {
       LOG_WARN("fail to init external sort", KR(ret));
     } else {
       is_inited_ = true;
     }
   }
+  lock_.unlock();
   return ret;
 }
 
@@ -629,7 +632,7 @@ int ObLoadExternalSort::init_external_sort() {
     ret = OB_NOT_INIT;
     LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
   } else if (OB_FAIL(external_sort_.init(MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, 0,
-                                  MTL_ID(), &compare_))) {
+                                         MTL_ID(), &compare_, &allocator_))) {
     LOG_WARN("fail to init external sort", KR(ret));
   } else {
     is_closed_ = false;
@@ -661,9 +664,13 @@ int ObLoadExternalSort::close() {
     LOG_WARN("unexpected closed external sort", KR(ret));
   } else if (OB_FAIL(external_sort_.do_sort(true))) {
     LOG_WARN("fail to do sort", KR(ret));
+  } else if (OB_FAIL(lock_.lock())) {
+    LOG_WARN("fail to lock", KR(ret));
   } else if (OB_FAIL(external_sort_.transfer_sorted_fragment_iter(
                  external_sort_all_))) {
     LOG_WARN("fail to transfer sorted fragment iter", KR(ret));
+  } else if (OB_FAIL(lock_.unlock())) {
+    LOG_WARN("fail to unlock", KR(ret));
   } else {
     external_sort_.clean_up();
     is_closed_ = true;
@@ -715,8 +722,9 @@ ObLoadSSTableWriter::~ObLoadSSTableWriter() {}
 
 int ObLoadSSTableWriter::init(const ObTableSchema *table_schema) {
   int ret = OB_SUCCESS;
+  lock_.lock();
   if (IS_INIT) {
-    ret = OB_INIT_TWICE;
+    ret = OB_SUCCESS;
     LOG_WARN("ObLoadSSTableWriter init twice", KR(ret), KP(this));
   } else if (OB_UNLIKELY(nullptr == table_schema)) {
     ret = OB_INVALID_ARGUMENT;
@@ -760,6 +768,7 @@ int ObLoadSSTableWriter::init(const ObTableSchema *table_schema) {
       is_inited_ = true;
     }
   }
+  lock_.unlock();
   return ret;
 }
 
@@ -1068,11 +1077,11 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init external_sort_
-  else if (!external_sort_->is_inited()&&OB_FAIL(external_sort_->init(table_schema))) {
+  else if (OB_FAIL(external_sort_->init(table_schema))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
   // init sstable_writer_
-  else if (!sstable_writer_->is_inited()&&OB_FAIL(sstable_writer_->init(table_schema))) {
+  else if (OB_FAIL(sstable_writer_->init(table_schema))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
   return ret;

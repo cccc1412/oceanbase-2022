@@ -664,13 +664,9 @@ int ObLoadExternalSort::close() {
     LOG_WARN("unexpected closed external sort", KR(ret));
   } else if (OB_FAIL(external_sort_.do_sort(true))) {
     LOG_WARN("fail to do sort", KR(ret));
-  } else if (OB_FAIL(lock_.lock())) {
-    LOG_WARN("fail to lock", KR(ret));
   } else if (OB_FAIL(external_sort_.transfer_sorted_fragment_iter(
                  external_sort_all_))) {
     LOG_WARN("fail to transfer sorted fragment iter", KR(ret));
-  } else if (OB_FAIL(lock_.unlock())) {
-    LOG_WARN("fail to unlock", KR(ret));
   } else {
     external_sort_.clean_up();
     is_closed_ = true;
@@ -686,7 +682,7 @@ int ObLoadExternalSort::finish() {
   } else if (OB_UNLIKELY(is_finished_)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("unexpected finished external sort", KR(ret));
-  } else if(OB_FAIL(external_sort_all_.do_sort(false))){
+  } else if(OB_FAIL(external_sort_all_.do_sort(true))){
     LOG_WARN("fail to do sort", KR(ret));
   } else{
     is_finished_=true;

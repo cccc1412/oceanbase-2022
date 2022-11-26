@@ -38,7 +38,7 @@ struct ObExternalSortConstant
   static const int64_t DEFAULT_FILE_READ_WRITE_BUFFER = 2 * 1024 * 1024LL; // 2m
   static const int64_t MIN_MULTIPLE_MERGE_COUNT = 2;
 
-  static const int64_t PARALLEL_SPILT_SIZE = 1L * 1024LL * 1024LL * 128L;
+  static const int64_t PARALLEL_SPILT_SIZE = 1L * 1024LL * 1024LL * 128LL;
   static inline int get_io_timeout_ms(const int64_t expire_timestamp, int64_t &wait_time_ms);
   static inline bool is_timeout(const int64_t expire_timestamp);
 };
@@ -1084,6 +1084,7 @@ private:
   int64_t dir_id_;
   bool is_writer_opened_;
   common::ObArenaAllocator* external_allocator_;
+  common::ObSpinLock lock_;
 };
 
 template<typename T, typename Compare>
@@ -1196,8 +1197,12 @@ int ObExternalSortRound<T, Compare>::add_fragment_iter(ObFragmentIterator<T> *it
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObExternalSortRound has not been inited", K(ret));
+  } else if (OB_FAIL(lock_.lock())) {
+    STORAGE_LOG(WARN,"fail to lock", K(ret));
   } else if (OB_FAIL(iters_.push_back(iter))) {
     STORAGE_LOG(WARN, "fail to add iterator", K(ret));
+  } else if (OB_FAIL(lock_.unlock())) {
+    STORAGE_LOG(WARN, "fail to unlock", K(ret));
   }
   return ret;
 }

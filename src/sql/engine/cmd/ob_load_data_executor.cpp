@@ -67,6 +67,7 @@ int ObLoadDataExecutor::do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
     while (offset < size) {
       ObLoadDataDirectTask ObLDDT(ctx, stmt, offset, offset + FILE_SPILT_SIZE,
                                   false, &external_sort, &sstable_writer);
+      ObLDDT.set_retry_interval(1000LL*1000LL*10LL);
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
         goto out;

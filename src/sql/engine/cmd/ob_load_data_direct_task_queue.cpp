@@ -47,7 +47,6 @@ void ObLoadDataDirectTaskQueue::run2() {
     ObAddr zero_addr;
     while (!stop_) {
       if (REACH_TIME_INTERVAL(600 * 1000 * 1000)) {
-        //每隔一段时间，打印队列的大小
         LOG_INFO("[ASYNC TASK QUEUE]", "queue_size", queue_.size());
       }
       ObAsyncTask *task = NULL;

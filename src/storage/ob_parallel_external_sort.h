@@ -1498,6 +1498,7 @@ public:
       Compare *compare, ExternalSortRound *next_round);
   int add_item(const T &item);
   int build_fragment();
+  int build_fragment_nosort();
   virtual int get_next_item(const T *&item);
   int finish();
   bool is_in_memory() const { return is_in_memory_; }
@@ -1637,10 +1638,37 @@ int ObMemorySortRound<T, Compare>::build_fragment()
   }
   return ret;
 }
+template <typename T, typename Compare>
+int ObMemorySortRound<T, Compare>::build_fragment_nosort() {
+  int ret = common::OB_SUCCESS;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = common::OB_NOT_INIT;
+    STORAGE_LOG(WARN, "ObMemorySortRound has not been inited", K(ret));
+  } else if (item_list_.size() > 0) {
+    int64_t start = common::ObTimeUtility::current_time();
+    for (int64_t i = 0; OB_SUCC(ret) && i < item_list_.size(); ++i) {
+      if (OB_FAIL(next_round_->add_item(*item_list_.at(i)))) {
+        STORAGE_LOG(WARN, "fail to add item", K(ret));
+      }
+    }
 
-template<typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::finish()
-{
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(next_round_->build_fragment())) {
+        STORAGE_LOG(WARN, "fail to build fragment", K(ret));
+      } else {
+        const int64_t write_fragment_time =
+            common::ObTimeUtility::current_time() - start;
+        STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
+        item_list_.reset();
+        allocator_.reuse();
+      }
+    }
+  }
+  return ret;
+}
+
+template <typename T, typename Compare>
+int ObMemorySortRound<T, Compare>::finish() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -1738,7 +1766,7 @@ int ObMemorySortRound<T, Compare>::transfer_sorted_fragment_iter(
   } else if (!is_in_memory()) {
     ret = common::OB_ERR_SYS;
     STORAGE_LOG(WARN, "ObMemorySortRound has not data", K(ret));
-  } else if (NULL == iter_ && OB_FAIL(build_fragment())) {
+  } else if (NULL == iter_ && OB_FAIL(build_fragment_nosort())) {
     STORAGE_LOG(WARN, "fail to build fragment", K(ret));
   } else if (OB_FAIL(next_round_->transfer_sorted_fragment_iter(dest_round))) {
     STORAGE_LOG(WARN, "fail to add transfer sorted fragment iter", K(ret));

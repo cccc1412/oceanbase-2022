@@ -7,7 +7,7 @@ echo $passwd| sudo -S perf record -F 300 -p $(pidof observer) -g \
 -e sched:sched_stat_iowait \
 -e sched:sched_stat_blocked \
 -e sched:sched_stat_wait \
--- sleep 180
+-- sleep 720
 # -F 采样频率
 # -g 生成函数调用 call gragh
 # -p 指定进程

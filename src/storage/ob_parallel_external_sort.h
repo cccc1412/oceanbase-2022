@@ -85,6 +85,7 @@ public:
   virtual int clean_up() { return common::OB_SUCCESS; }
   virtual int prefetch() {return common::OB_SUCCESS; }
   virtual TO_STRING_KV(K(""));
+  virtual void print() { STORAGE_LOG(WARN, "ObFragmentIterator print"); }
 };
 
 template<typename T>
@@ -537,6 +538,7 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
 template <typename T>
 ObFragmentReaderV2<T>::~ObFragmentReaderV2()
 {
+  STORAGE_LOG(WARN, "~ObFragmentReaderV2() destroy");
   reset();
 }
 
@@ -892,7 +894,9 @@ int ObFragmentMerge<T, Compare>::open()
     STORAGE_LOG(WARN, "ObFragmentMerge has been opened before", K(ret));
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < iters_.count(); ++i) {
-      if (OB_FAIL(iters_.at(i)->prefetch())) {
+      FragmentIterator* it=iters_.at(i);
+      it->print();
+      if (OB_FAIL(it->prefetch())) {
         STORAGE_LOG(WARN, "fail to prefetch", K(ret));
       }
     }
@@ -1063,6 +1067,7 @@ public:
   int get_next_item(const T *&item);
   int64_t get_fragment_count();
   int add_fragment_iter(ObFragmentIterator<T> *iter);
+  int transfer_sorted_fragment_iter(ObExternalSortRound &dest_round);
   int transfer_final_sorted_fragment_iter(ObExternalSortRound &dest_round);
 private:
   typedef ObFragmentReaderV2<T> FragmentReader;
@@ -1195,6 +1200,29 @@ int ObExternalSortRound<T, Compare>::add_fragment_iter(ObFragmentIterator<T> *it
   } else if (OB_FAIL(iters_.push_back(iter))) {
     STORAGE_LOG(WARN, "fail to add iterator", K(ret));
   }
+  iter->print();
+  return ret;
+}
+
+template <typename T, typename Compare>
+int ObExternalSortRound<T, Compare>::transfer_sorted_fragment_iter(
+    ObExternalSortRound<T, Compare> &dest_round) {
+  int ret = common::OB_SUCCESS;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = common::OB_NOT_INIT;
+    STORAGE_LOG(WARN, "ObExternalSortRound has not been inited", K(ret));
+  } else {
+    int64_t i=0;
+    while (OB_SUCC(ret) && i < iters_.size()) {
+      if (OB_FAIL(dest_round.add_fragment_iter(iters_.at(i)))) {
+        STORAGE_LOG(WARN, "fail to add fragment iterator", K(ret));
+      }
+      i++;
+    }
+    if (OB_SUCC(ret)) {
+      iters_.reset();
+    }
+  }
   return ret;
 }
 
@@ -1289,6 +1317,7 @@ int ObExternalSortRound<T, Compare>::do_one_run(
     const int64_t end_reader_idx = std::min(start_reader_idx + merge_count_, iters_.count());
     FragmentIteratorList iters;
     for (int64_t i = start_reader_idx; OB_SUCC(ret) && i < end_reader_idx; ++i) {
+      iters_.at(i)->print();
       if (OB_FAIL(iters.push_back(iters_.at(i)))) {
         STORAGE_LOG(WARN, "fail to push back iterator list", K(ret));
       }
@@ -1424,6 +1453,7 @@ ObMemoryFragmentIterator<T>::ObMemoryFragmentIterator()
 template<typename T>
 ObMemoryFragmentIterator<T>::~ObMemoryFragmentIterator()
 {
+  STORAGE_LOG(WARN, "~ObMemoryFragmentIterator() destroy");
 }
 
 template<typename T>
@@ -1472,6 +1502,7 @@ public:
   bool is_in_memory() const { return is_in_memory_; }
   bool has_data() const { return has_data_; }
   void reset();
+  int transfer_sorted_fragment_iter(ExternalSortRound &dest_round);
   int transfer_final_sorted_fragment_iter(ExternalSortRound &dest_round);
   TO_STRING_KV(K(is_inited_), K(is_in_memory_), K(has_data_), K(buf_mem_limit_),
       K(expire_timestamp_), KP(next_round_), KP(compare_), KP(iter_));
@@ -1696,6 +1727,13 @@ void ObMemorySortRound<T, Compare>::reset()
 }
 
 template<typename T, typename Compare>
+int ObMemorySortRound<T, Compare>::transfer_sorted_fragment_iter(
+    ExternalSortRound &dest_round)
+{
+  return transfer_final_sorted_fragment_iter(dest_round);
+}
+
+template<typename T, typename Compare>
 int ObMemorySortRound<T, Compare>::transfer_final_sorted_fragment_iter(
     ExternalSortRound &dest_round)
 {
@@ -1731,6 +1769,7 @@ public:
   int get_next_item(const T *&item);
   void clean_up();
   int add_fragment_iter(ObFragmentIterator<T> *iter);
+  int transfer_sorted_fragment_iter(ObExternalSort<T, Compare> &merge_sorter);
   int transfer_final_sorted_fragment_iter(ObExternalSort<T, Compare> &merge_sorter);
   int get_current_round(ExternalSortRound *&round);
   TO_STRING_KV(K(is_inited_), K(file_buf_size_), K(buf_mem_limit_), K(expire_timestamp_),
@@ -1944,6 +1983,37 @@ int ObExternalSort<T, Compare>::get_current_round(ExternalSortRound *&curr_round
     STORAGE_LOG(WARN, "invalid current round", K(ret), KP(curr_round_));
   } else {
     curr_round = curr_round_;
+  }
+  return ret;
+}
+
+template <typename T, typename Compare>
+int ObExternalSort<T, Compare>::transfer_sorted_fragment_iter(
+    ObExternalSort<T, Compare> &merge_sorter) {
+  int ret = common::OB_SUCCESS;
+  ExternalSortRound *curr_round = NULL;
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = common::OB_NOT_INIT;
+    STORAGE_LOG(WARN, "ObExternalSort has not been inited", K(ret));
+  } else if (is_empty_) {
+    ret = common::OB_SUCCESS;
+  } else if (OB_FAIL(merge_sorter.get_current_round(curr_round))) {
+    STORAGE_LOG(WARN, "fail to get current round", K(ret));
+  } else if (NULL == curr_round) {
+    ret = common::OB_ERR_SYS;
+    STORAGE_LOG(WARN, "invalid inner state", K(ret), KP(curr_round));
+  } else if (memory_sort_round_.is_in_memory()) {
+    if (OB_FAIL(
+            memory_sort_round_.transfer_sorted_fragment_iter(*curr_round))) {
+      STORAGE_LOG(WARN, "fail to transfer final sorted fragment iterator",
+                  K(ret));
+    } else {
+      merge_sorter.is_empty_ = false;
+    }
+  } else if (OB_FAIL(curr_round_->transfer_sorted_fragment_iter(*curr_round))) {
+    STORAGE_LOG(WARN, "fail to get transfer sorted fragment iterator", K(ret));
+  } else {
+    merge_sorter.is_empty_ = false;
   }
   return ret;
 }

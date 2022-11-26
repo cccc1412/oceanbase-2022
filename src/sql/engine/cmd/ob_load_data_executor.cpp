@@ -87,7 +87,7 @@ int ObLoadDataExecutor::do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
   int ret = OB_SUCCESS;
   ObLoadDataDirectTaskQueue async_tq;
   async_tq.set_run_wrapper(MTL_CTX());
-  if (OB_FAIL(external_sort.close())) {
+  if (OB_FAIL(external_sort.finish())) {
       LOG_WARN("cannot close sort", KR(ret));
   } else if (OB_FAIL(async_tq.init(IO_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
     LOG_WARN("cannot init async_tq", KR(ret));

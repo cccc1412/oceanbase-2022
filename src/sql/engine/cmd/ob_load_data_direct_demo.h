@@ -11,7 +11,11 @@
 
 namespace oceanbase {
 namespace sql {
-#define MAX_RECORD_SIZE 1024L * 1024L
+
+static const int64_t MAX_RECORD_SIZE = (1LL << 20);     // 1M
+static const int64_t MEM_BUFFER_SIZE = (1LL << 30);  // 1G
+static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
+
 class ObLoadDataBuffer {
 public:
   ObLoadDataBuffer();
@@ -156,29 +160,29 @@ class ObLoadExternalSort {
 public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
-  int init(const share::schema::ObTableSchema *table_schema, int64_t mem_size,
-           int64_t file_buf_size);
-  bool is_inited() {return ATOMIC_LOAD(&is_inited_);}
+  int init(const share::schema::ObTableSchema *table_schema);
+  inline bool is_inited() {return ATOMIC_LOAD(&is_inited_);}
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
+  int finish();
   int get_next_row(const ObLoadDatumRow *&datum_row);
-  void lock() {lock_.lock();}
-  void unlock() {lock_.unlock();}
+  int init_external_sort();
 private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
   ObLoadDatumRowCompare compare_;
-  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
-  bool is_closed_;
+  static thread_local storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
+  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_all_;
+  static thread_local bool is_closed_;
   bool is_inited_;
-  common::ObSpinLock lock_;
+  bool is_finished_;
 };
 
 class ObLoadSSTableWriter {
 public:
   ObLoadSSTableWriter();
   ~ObLoadSSTableWriter();
-  int init(const share::schema::ObTableSchema *table_schema);
+  inline int init(const share::schema::ObTableSchema *table_schema);
   bool is_inited() { return ATOMIC_LOAD(&is_inited_); }
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
@@ -210,8 +214,6 @@ private:
 };
 
 class ObLoadDataDirectDemo : public ObLoadDataBase {
-  static const int64_t MEM_BUFFER_SIZE = (1LL << 30);  // 1G
-  static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
 public:
   ObLoadDataDirectDemo();
   virtual ~ObLoadDataDirectDemo();

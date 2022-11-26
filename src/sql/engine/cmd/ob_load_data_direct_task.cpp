@@ -33,6 +33,8 @@ int ObLoadDataDirectTask::process() {
   } else if (OB_FAIL(load_direct->init(stmt_, offset_, end_, processed_,
                                        external_sort_, sstable_writer_))) {
     LOG_WARN("failed to execute load data stmt", K(ret));
+  } else if (!processed_ && OB_FAIL(external_sort_->init_external_sort())) {
+    LOG_WARN("failed to init macro external sort", K(ret));
   } else if (processed_ && OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
     LOG_WARN("failed to init macro block writer", K(ret));
   } else {

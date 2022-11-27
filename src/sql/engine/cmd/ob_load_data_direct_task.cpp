@@ -42,7 +42,9 @@ int ObLoadDataDirectTask::process() {
       LOG_WARN("failed to execute load data stmt", K(ret));
     }
   }
-  load_direct->~ObLoadDataDirectDemo();
-  ctx_.get_allocator().free(load_direct);
+  if(load_direct != nullptr) {
+    load_direct->~ObLoadDataDirectDemo();
+    ctx_.get_allocator().free(load_direct);
+  }
   return ret;
 }

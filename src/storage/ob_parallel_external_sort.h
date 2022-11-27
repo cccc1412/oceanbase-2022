@@ -347,7 +347,7 @@ int ObFragmentWriterV2<T>::flush_buffer()
     io_info.fd_ = fd_;
     io_info.dir_id_ = dir_id_;
     //io_info.size_ = buf_size_;
-    io_info.size_ = compress_size + 8;
+    io_info.size_ = buf_size_ / 3;
     io_info.tenant_id_ = tenant_id_;
     //io_info.buf_ = buf_;
     io_info.buf_ = compress_buf_;
@@ -613,7 +613,7 @@ int ObFragmentReaderV2<T>::init(
       dir_id_ = dir_id;
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
-      buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
+      buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) / 3;
       is_inited_ = true;
     }
   }

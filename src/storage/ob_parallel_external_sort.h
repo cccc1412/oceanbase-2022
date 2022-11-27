@@ -332,7 +332,7 @@ int ObFragmentWriterV2<T>::flush_buffer()
     STORAGE_LOG(WARN, "fail to get io timeout ms", K(ret), K(expire_timestamp_));
   } else if (OB_FAIL(file_io_handle_.wait(timeout_ms))) {
     STORAGE_LOG(WARN, "fail to wait io finish", K(ret));
-  } else if(OB_FAIL(compressor_.compress(buf_ + 8, buf_size_ - 8, compress_buf_ + 8, buf_size_ + buf_size_ / 255 + 32, compress_size))){
+  } else if(OB_FAIL(compressor_.compress(buf_ + 8, macro_buffer_writer_.size() - 8, compress_buf_ + 8, buf_size_ + buf_size_ / 255 + 32, compress_size))){
     STORAGE_LOG(WARN, "fail to compress", K(compress_size), K(buf_size_));
   } else if(OB_FAIL(macro_buffer_writer_.assign(compress_size + ObExternalSortConstant::BUF_HEADER_LENGTH, compress_size, compress_buf_))) {
     STORAGE_LOG(WARN, "faile to assign macro buffer writer");
@@ -453,6 +453,7 @@ template<typename T>
 ObMacroBufferReader<T>::ObMacroBufferReader()
   : buf_(NULL), decompress_buf_(NULL) ,buf_pos_(0), buf_len_(0), buf_cap_(0)
 {
+  decompress_buf_ = new char[3*1<<20];
 }
 
 template<typename T>
@@ -472,8 +473,7 @@ int ObMacroBufferReader<T>::read_item(T &item)
       STORAGE_LOG(WARN, "fail to deserialize header");
     }
     int64_t decompress_size = 0;
-    decompress_buf_ = new char[buf_len_*5];
-    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, buf_len_*5, decompress_size);
+    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, 3*1<<20, decompress_size);
     memcpy(decompress_buf_, buf_, 8);
     buf_ = decompress_buf_;
     buf_len_ = decompress_size + 8;

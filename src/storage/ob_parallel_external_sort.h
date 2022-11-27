@@ -339,10 +339,6 @@ int ObFragmentWriterV2<T>::flush_buffer()
   } else if (OB_FAIL(macro_buffer_writer_.serialize_header())) {
     STORAGE_LOG(WARN, "fail to serialize header", K(ret));
   } else {
-    char * test = new char[buf_size_];
-    int64_t test_size = 0;
-    compressor_.decompress(compress_buf_ + 8, compress_size, test, buf_size_,test_size ); 
-
     blocksstable::ObTmpFileIOInfo io_info;
     io_info.fd_ = fd_;
     io_info.dir_id_ = dir_id_;

@@ -20,7 +20,7 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t FILE_SPILT_SIZE = 1LL * 1024LL * 1024LL * 512LL;
+  static const int64_t FILE_SPILT_SIZE = 6LL * 1024LL * 1024LL * 1024LL;
   // static const int64_t FILE_SPILT_SIZE = 1LL * 1024LL * 1024LL * 256LL;
   static const int64_t PROCESS_THREAD_NUM = 6;
   static const int64_t IO_THREAD_NUM=1;

@@ -449,7 +449,7 @@ template<typename T>
 ObMacroBufferReader<T>::ObMacroBufferReader()
   : buf_(NULL), decompress_buf_(NULL) ,buf_pos_(0), buf_len_(0), buf_cap_(0)
 {
-  decompress_buf_ = new char[3*1<<20];
+  decompress_buf_ = new char[10*2<<20];
 }
 
 template<typename T>
@@ -469,7 +469,7 @@ int ObMacroBufferReader<T>::read_item(T &item)
       STORAGE_LOG(WARN, "fail to deserialize header");
     }
     int64_t decompress_size = 0;
-    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, 3*1<<20, decompress_size);
+    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, 10*2<<20, decompress_size);
     memcpy(decompress_buf_, buf_, 8);
     buf_ = decompress_buf_;
     buf_len_ = decompress_size + 8;

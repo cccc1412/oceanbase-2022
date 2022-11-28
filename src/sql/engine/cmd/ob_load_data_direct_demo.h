@@ -15,7 +15,7 @@ namespace sql {
 static const int64_t MAX_RECORD_SIZE = (1LL << 20);  // 1M
 static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*(512LL+256LL);  // 768M
 // static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*128LL;  // 128M
-static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
+static const int64_t FILE_BUFFER_SIZE = (10*2LL << 20); // 2M
 
 class ObLoadDataBuffer {
 public:

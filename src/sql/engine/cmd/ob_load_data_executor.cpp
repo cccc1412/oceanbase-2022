@@ -61,6 +61,9 @@ int ObLoadDataExecutor::do_execute(ObExecContext &ctx, ObLoadDataStmt &stmt,
     load_async_tq.wait_task();
     load_async_tq.stop();
     load_async_tq.wait();
+    if (OB_FAIL(sstable_writer.finish())) {
+      LOG_WARN("cannot close sstable", KR(ret));
+    }
   }
   return ret;
 }
@@ -117,11 +120,6 @@ int ObLoadDataExecutor::do_load(ObLoadDataDirectTaskQueue &async_tq,
         LOG_WARN("cannot push task", KR(ret));
         break;
       }
-    }
-  }
-  if (OB_SUCC(ret)) {
-    if (OB_FAIL(sstable_writer.finish())) {
-      LOG_WARN("cannot close sstable", KR(ret));
     }
   }
   return ret;

@@ -1,9 +1,7 @@
 #pragma once
 
 #include "lib/container/ob_array.h"
-#include "lib/container/ob_se_array.h"
 #include "lib/container/ob_vector.h"
-#include "lib/thread/thread.h"
 #include "lib/file/ob_file.h"
 #include "lib/lock/ob_spin_lock.h"
 #include "lib/timezone/ob_timezone_info.h"
@@ -20,11 +18,11 @@
 namespace oceanbase {
 namespace sql {
 
-static const int64_t MAX_RECORD_SIZE = (1LL << 20);  // 1M
+static const int64_t MAX_RECORD_SIZE = 8LL*1024LL;  // 1M
 static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*(512LL+256LL);  // 768M
 // static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*128LL;  // 128M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
-static const int64_t SAMPLING_NUM = (1LL << 22);
+static const int64_t SAMPLING_NUM = (1LL << 20);
 
 class ObLoadDataBuffer {
 public:
@@ -224,8 +222,9 @@ private:
 // 首先会对数据进行采样划分范围
 // CSV->DISPATCH->EXTERNAL_SORT
 class ObLoadDispatcher {
+  typedef common::ObSpinLock Lock;
+  typedef lib::ObLockGuard<Lock> LockGuard;
   typedef common::ObVector<ObLoadDatumRow *> LoadDatumRowVector;
-
 public:
   // thread_num 指的是向 ObLoadDispatcher 提供数据的线程数量
   // dispatch_num 指的是 ObLoadDispatcher 分发到外排桶的数量
@@ -243,7 +242,7 @@ private:
   int do_stat();
 
 private:
-  common::ObSpinLock lock_;
+  Lock lock_;
   bool is_inited_;
   int thread_num_;
   common::ObArray<bool> is_closed_;
@@ -258,10 +257,10 @@ private:
 
   std::atomic<int64_t> current_num_;
   LoadDatumRowVector smapling_data_;
-  common::ObSpinLock smapling_data_lock;
+  Lock smapling_data_lock_;
 
   int dispatch_num_;
-  common::ObSpinLock* dispatch_lock_[100];
+  Lock* dispatch_lock_[100];
   common::ObArray<ObLoadDatumRow *> dispatch_point_;
   common::ObArray<LoadDatumRowVector> dispatch_data_;
 };

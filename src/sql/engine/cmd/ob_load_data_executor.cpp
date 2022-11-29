@@ -62,12 +62,14 @@ int ObLoadDataExecutor::do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
   } else if (OB_FAIL(async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));
   } else {
+    int task_id = 0;
     off64_t size = st.st_size;
     int64_t offset = 0;
     while (offset < size) {
       ObLoadDataDirectTask ObLDDT(ctx, stmt, offset, offset + FILE_SPILT_SIZE,
-                                  false, &external_sort, &sstable_writer);
+                                  false, &external_sort, &sstable_writer, task_id);
       ObLDDT.set_retry_interval(1000LL*1000LL*10LL);
+      task_id ++;
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
         goto out;

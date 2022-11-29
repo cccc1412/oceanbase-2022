@@ -16,12 +16,10 @@ using namespace observer;
 using namespace share;
 using namespace share::schema;
 
-thread_local blocksstable::ObMacroBlockWriter ObLoadSSTableWriter::macro_block_writer_;
+thread_local blocksstable::ObMacroBlockWriter
+    ObLoadSSTableWriter::macro_block_writer_;
 thread_local blocksstable::ObDatumRow ObLoadSSTableWriter::datum_row_;
 thread_local bool ObLoadSSTableWriter::is_closed_ = false;
-thread_local storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare>
-    ObLoadExternalSort::external_sort_;
-thread_local bool ObLoadExternalSort::is_closed_ = false;
 /**
  * ObLoadDataBuffer
  */
@@ -351,7 +349,7 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
     if (OB_UNLIKELY(count <= 0)) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("unexpected count", K(count));
-    } else if (count > capacity_ && OB_FAIL(init(count))) { //TODO: mcz
+    } else if (count > capacity_ && OB_FAIL(init(count))) { // TODO: mcz
       LOG_WARN("fail to init", KR(ret));
     } else {
       OB_UNIS_DECODE_ARRAY(datums_, count);
@@ -584,19 +582,303 @@ int ObLoadRowCaster::cast_obj_to_datum(const ObColumnSchemaV2 *column_schema,
 }
 
 /**
- * ObLoadExternalSort
+ * ObLoadDispatcher
  */
 
-ObLoadExternalSort::ObLoadExternalSort()
-    : is_inited_(false), is_finished_(false) {}
+ObLoadDispatcher::ObLoadDispatcher(int thread_num, int dispatch_num)
+    : is_inited_(false), thread_num_(thread_num), is_finished_(false), finish_smapling_(false),
+      finish_smapling_stat_(false), current_num_(0),
+      dispatch_num_(dispatch_num) {}
 
-ObLoadExternalSort::~ObLoadExternalSort() {}
+ObLoadDispatcher::~ObLoadDispatcher() {}
 
-int ObLoadExternalSort::init(const ObTableSchema *table_schema) {
+int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
   int ret = OB_SUCCESS;
   lock_.lock();
   if (IS_INIT) {
     ret = OB_SUCCESS;
+    LOG_WARN("ObLoadSSTableWriter init twice", KR(ret), KP(this));
+  } else if (dispatch_num_ < 3 || dispatch_num_ > 100) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid args", KR(ret));
+  } else {
+    allocator_.set_tenant_id(MTL_ID());
+    const int64_t rowkey_column_num = table_schema->get_rowkey_column_num();
+    ObArray<ObColDesc> multi_version_column_descs;
+    if (OB_FAIL(table_schema->get_multi_version_column_descs(
+            multi_version_column_descs))) {
+      LOG_WARN("fail to get multi version column descs", KR(ret));
+    } else if (OB_FAIL(datum_utils_.init(multi_version_column_descs,
+                                         rowkey_column_num, is_oracle_mode(),
+                                         allocator_))) {
+      LOG_WARN("fail to init datum utils", KR(ret));
+    } else if (OB_FAIL(compare_.init(rowkey_column_num, &datum_utils_))) {
+      LOG_WARN("fail to init compare", KR(ret));
+    } else if (OB_FAIL(is_closed_.reserve(thread_num_))) {
+      LOG_WARN("fail to alloc memory", KR(ret));
+    } else if (OB_FAIL(smapling_data_.reserve(SAMPLING_NUM))) {
+      LOG_WARN("fail to alloc memory", KR(ret));
+    } else if (OB_FAIL(dispatch_data_.reserve(dispatch_num_))) {
+      LOG_WARN("fail to alloc memory", KR(ret));
+    } else if (OB_FAIL(dispatch_point_.reserve(dispatch_num_ - 1))) {
+      LOG_WARN("fail to alloc memory", KR(ret));
+    } else {
+      is_inited_ = true;
+      for (int i = 0; i < thread_num_; i++) {
+        is_closed_.push_back(false);
+      }
+      for (int i = 0; i < dispatch_num_ && OB_SUCC(ret); i++) {
+        void *buf=nullptr;
+        ObSpinLock *dispatch_lock=nullptr;
+        if (OB_ISNULL(buf = allocator_.alloc(sizeof(ObSpinLock)))) {
+          LOG_WARN("fail to alloc memory", KR(ret));
+        } else if (OB_ISNULL(dispatch_lock = new (buf) ObSpinLock())) {
+          LOG_WARN("fail to alloc memory", KR(ret));
+        } else {
+          dispatch_lock_[i]=dispatch_lock;
+          dispatch_data_.push_back(LoadDatumRowVector());
+        }
+      }
+    }
+  }
+  lock_.unlock();
+  return ret;
+}
+
+int ObLoadDispatcher::do_dispatch_all() {
+  int ret = OB_SUCCESS;
+  size_t smapling_size = smapling_data_.size();
+  for (size_t i = 0; i < smapling_size; ++i) {
+    ObLoadDatumRow *item = smapling_data_.at(i);
+    if (OB_FAIL(do_dispatch_one(item))) {
+      LOG_WARN("fail to do dispatch one", KR(ret));
+      break;
+    }
+  }
+  smapling_data_.reset();
+  return ret;
+}
+
+int ObLoadDispatcher::do_dispatch_one(const ObLoadDatumRow *item) {
+  int ret = OB_SUCCESS;
+  size_t dispatch_size = dispatch_point_.size();
+  // item < dispatch_point_[0]
+  if (compare_(item, dispatch_point_[0])) {
+    if (OB_FAIL(dispatch_lock_[0]->lock())) {
+      LOG_WARN("fail to lock", KR(ret));
+    } else if (OB_FAIL(dispatch_data_[0].push_back(item))) {
+      LOG_WARN("fail to push back", KR(ret));
+    } else if (OB_FAIL(dispatch_lock_[0]->unlock())) {
+      LOG_WARN("fail to unlock", KR(ret));
+    }
+  }
+  // item >= dispatch_point_[dispatch_size - 1]
+  else if (!compare_(item, dispatch_point_[dispatch_size - 1])) {
+    if (OB_FAIL(dispatch_lock_[dispatch_size]->lock())) {
+      LOG_WARN("fail to lock", KR(ret));
+    } else if (OB_FAIL(dispatch_data_[dispatch_size].push_back(item))) {
+      LOG_WARN("fail to push back", KR(ret));
+    } else if (OB_FAIL(dispatch_lock_[dispatch_size]->unlock())) {
+      LOG_WARN("fail to unlock", KR(ret));
+    }
+  }
+  // item >= dispatch_point_[j - 1] and item < dispatch_point_[j]
+  else {
+    for (size_t j = 1; j < dispatch_size; j++) {
+      if (!compare_(item, dispatch_point_[j - 1]) &&
+          compare_(item, dispatch_point_[j])) {
+        if (OB_FAIL(dispatch_lock_[0]->lock())) {
+          LOG_WARN("fail to lock", KR(ret));
+        } else if (OB_FAIL(dispatch_data_[0].push_back(item))) {
+          LOG_WARN("fail to push back", KR(ret));
+        } else if (OB_FAIL(dispatch_lock_[0]->unlock())) {
+          LOG_WARN("fail to unlock", KR(ret));
+        }
+        break;
+      }
+    }
+  }
+  return ret;
+}
+
+int ObLoadDispatcher::do_stat() {
+  int ret = OB_SUCCESS;
+  std::sort(smapling_data_.begin(), smapling_data_.end(), compare_);
+  if (OB_FAIL(compare_.result_code_)) {
+    LOG_WARN("fail to do sort", KR(ret));
+  } else {
+    int split_point_num = dispatch_num_ - 1;
+    for (int i = 0; i < split_point_num && OB_SUCC(ret); i++) {
+      int index = SAMPLING_NUM / (split_point_num - 1) * i;
+      const ObLoadDatumRow &datum_row = *smapling_data_.at(i);
+      char *buf = NULL;
+      ObLoadDatumRow *new_item = NULL;
+      const int64_t item_size =
+          sizeof(ObLoadDatumRow) + datum_row.get_deep_copy_size();
+      if (OB_FAIL(lock_.lock())) {
+        LOG_WARN("fail to lock", K(ret));
+      } else if (OB_ISNULL(
+                     buf = static_cast<char *>(allocator_.alloc(item_size)))) {
+        ret = common::OB_ALLOCATE_MEMORY_FAILED;
+        LOG_WARN("fail to allocate memory", K(ret), K(item_size));
+      } else if (OB_FAIL(lock_.unlock())) {
+        LOG_WARN("fail to unlock", K(ret));
+      } else if (OB_ISNULL(new_item = new (buf) ObLoadDatumRow())) {
+        ret = common::OB_ALLOCATE_MEMORY_FAILED;
+        LOG_WARN("fail to placement new item", K(ret));
+      } else {
+        int64_t buf_pos = sizeof(ObLoadDatumRow);
+        if (OB_FAIL(new_item->deep_copy(datum_row, buf, item_size, buf_pos))) {
+          LOG_WARN("fail to deep copy item", K(ret));
+        } else {
+          dispatch_point_.push_back(new_item);
+          LOG_INFO("new dispatch point", KP(new_item));
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+int ObLoadDispatcher::append_row(const ObLoadDatumRow &datum_row) {
+  int ret = OB_SUCCESS;
+  if (IS_NOT_INIT) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("ObLoadDispatcher not init", KR(ret), KP(this));
+  } else if (is_finished_) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected closed dispatcher", KR(ret));
+  }
+
+  char *buf = NULL;
+  ObLoadDatumRow *new_item = NULL;
+  const int64_t item_size =
+      sizeof(ObLoadDatumRow) + datum_row.get_deep_copy_size();
+  if (OB_FAIL(lock_.lock())) {
+    LOG_WARN("fail to lock", K(ret));
+  } else if (OB_ISNULL(buf =
+                           static_cast<char *>(allocator_.alloc(item_size)))) {
+    ret = common::OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("fail to allocate memory", K(ret), K(item_size));
+  } else if (OB_FAIL(lock_.unlock())) {
+    LOG_WARN("fail to unlock", K(ret));
+  } else if (OB_ISNULL(new_item = new (buf) ObLoadDatumRow())) {
+    ret = common::OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("fail to placement new item", K(ret));
+  } else {
+    int64_t buf_pos = sizeof(ObLoadDatumRow);
+    if (OB_FAIL(new_item->deep_copy(datum_row, buf, item_size, buf_pos))) {
+      LOG_WARN("fail to deep copy item", K(ret));
+    } else {
+      while (current_num_ >= SAMPLING_NUM)
+        sleep(1);
+      smapling_data_lock.lock();
+      // 采样完成后，数据直接分发对应的桶内
+      if (finish_smapling_) {
+        if (OB_FAIL(do_dispatch_one(new_item))) {
+          LOG_WARN("fail to do dispatch one", KR(ret));
+        } else {
+          current_num_++;
+        }
+      }
+      // 采样未完成，数据放到对应采样数组内，采样结束后再分发到对应的桶内
+      else {
+        if (OB_FAIL(smapling_data_.push_back(new_item))) {
+          LOG_WARN("fail to do push back", KR(ret));
+        } else {
+          current_num_++;
+          if (current_num_ >= SAMPLING_NUM) {
+            finish_smapling_ = true;
+            if (OB_FAIL(do_stat())) {
+              LOG_WARN("fail to do stat", KR(ret));
+            } else if (OB_FAIL(do_dispatch_all())) {
+              LOG_WARN("fail to do dispatch all", KR(ret));
+            } else {
+              finish_smapling_stat_ = true;
+            }
+          }
+        }
+      }
+      smapling_data_lock.unlock();
+    }
+  }
+  return ret;
+}
+
+int ObLoadDispatcher::get_next_row(int idx, const ObLoadDatumRow *&datum_row) {
+  int ret = OB_SUCCESS;
+  if (idx >= dispatch_num_ || idx < 0) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid args", KR(ret));
+  } else {
+    while (!finish_smapling_stat_)
+      sleep(1);
+    // 未完成并且数据为空
+    while (!is_finished_ && dispatch_data_[idx].size() == 0)
+      sleep(1);
+    if (dispatch_data_[idx].size() == 0) {
+      datum_row=nullptr;
+      ret = OB_ITER_END;
+      LOG_WARN("current thread has no data to process", KR(ret));
+    } else {
+      dispatch_lock_[idx]->lock();
+      auto last = dispatch_data_[idx].last();
+      datum_row = *last;
+      dispatch_data_[idx].remove(last);
+      dispatch_lock_[idx]->unlock();
+    }
+  }
+  return ret;
+}
+
+void ObLoadDispatcher::free(const ObLoadDatumRow *&datum_row) {
+  lock_.lock();
+  allocator_.free((void *)datum_row);
+  datum_row = nullptr;
+  current_num_--;
+  lock_.unlock();
+}
+
+int ObLoadDispatcher::close(int idx) {
+  int ret = OB_SUCCESS;
+  lock_.lock();
+  if (IS_NOT_INIT) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("ObLoadDispatcher not init", KR(ret), KP(this));
+  } else if (OB_UNLIKELY(is_closed_[idx])) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected closed ObLoadDispatcher", KR(ret));
+  } else {
+    is_closed_[idx]=true;
+    bool is_finish = true;
+    for (size_t i = 0; i < is_closed_.size(); i++) {
+      if (!is_closed_[i]) {
+        is_finish = false;
+        break;
+      }
+    }
+    if (is_finish)
+      is_finished_ = true;
+  }
+  lock_.unlock();
+  return ret;
+}
+
+/**
+ * ObLoadExternalSort
+ */
+
+ObLoadExternalSort::ObLoadExternalSort()
+    : allocator_(ObModIds::OB_SQL_LOAD_DATA), is_closed_(false),
+      is_inited_(false) {}
+
+ObLoadExternalSort::~ObLoadExternalSort() { external_sort_.clean_up(); }
+
+int ObLoadExternalSort::init(const ObTableSchema *table_schema,
+                             int64_t mem_size, int64_t file_buf_size) {
+  int ret = OB_SUCCESS;
+  if (IS_INIT) {
+    ret = OB_INIT_TWICE;
     LOG_WARN("ObLoadExternalSort init twice", KR(ret), KP(this));
   } else if (OB_UNLIKELY(nullptr == table_schema)) {
     ret = OB_INVALID_ARGUMENT;
@@ -614,28 +896,12 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema) {
       LOG_WARN("fail to init datum utils", KR(ret));
     } else if (OB_FAIL(compare_.init(rowkey_column_num, &datum_utils_))) {
       LOG_WARN("fail to init compare", KR(ret));
-    } else if (OB_FAIL(external_sort_all_.init(MEM_BUFFER_SIZE,
-                                               FILE_BUFFER_SIZE, 0, MTL_ID(),
-                                               &compare_, &allocator_))) {
+    } else if (OB_FAIL(external_sort_.init(mem_size, file_buf_size, 0, MTL_ID(),
+                                           &compare_))) {
       LOG_WARN("fail to init external sort", KR(ret));
     } else {
       is_inited_ = true;
     }
-  }
-  lock_.unlock();
-  return ret;
-}
-
-int ObLoadExternalSort::init_external_sort() {
-  int ret= OB_SUCCESS;
-  if (IS_NOT_INIT) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
-  } else if (OB_FAIL(external_sort_.init(MEM_BUFFER_SIZE, FILE_BUFFER_SIZE, 0,
-                                         MTL_ID(), &compare_, &allocator_))) {
-    LOG_WARN("fail to init external sort", KR(ret));
-  } else {
-    is_closed_ = false;
   }
   return ret;
 }
@@ -662,32 +928,10 @@ int ObLoadExternalSort::close() {
   } else if (OB_UNLIKELY(is_closed_)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("unexpected closed external sort", KR(ret));
-  } 
-  else if (OB_FAIL(external_sort_.do_sort(true))) {
+  } else if (OB_FAIL(external_sort_.do_sort(true))) {
     LOG_WARN("fail to do sort", KR(ret));
-  } 
-  else if (OB_FAIL(external_sort_.transfer_sorted_fragment_iter(
-                 external_sort_all_))) {
-    LOG_WARN("fail to transfer sorted fragment iter", KR(ret));
   } else {
-    external_sort_.clean_up();
     is_closed_ = true;
-  }
-  return ret;
-}
-
-int ObLoadExternalSort::finish() {
-  int ret = OB_SUCCESS;
-  if (IS_NOT_INIT) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
-  } else if (OB_UNLIKELY(is_finished_)) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("unexpected finished external sort", KR(ret));
-  } else if(OB_FAIL(external_sort_all_.do_sort(true))){
-    LOG_WARN("fail to do sort", KR(ret));
-  } else{
-    is_finished_=true;
   }
   return ret;
 }
@@ -697,16 +941,14 @@ int ObLoadExternalSort::get_next_row(const ObLoadDatumRow *&datum_row) {
   if (IS_NOT_INIT) {
     ret = OB_NOT_INIT;
     LOG_WARN("ObLoadExternalSort not init", KR(ret), KP(this));
-  } else if (OB_UNLIKELY(!is_finished_)) {
+  } else if (OB_UNLIKELY(!is_closed_)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("unexpected not closed external sort", KR(ret));
-  } else if (OB_FAIL(external_sort_all_.get_next_item(datum_row))) {
+  } else if (OB_FAIL(external_sort_.get_next_item(datum_row))) {
     LOG_WARN("fail to get next item", KR(ret));
   }
   return ret;
 }
-
-
 
 /**
  * ObLoadSSTableWriter
@@ -837,7 +1079,7 @@ int ObLoadSSTableWriter::init_macro_block_writer(const int64_t parallel_idx) {
       LOG_WARN("fail to init macro block writer", KR(ret), K(data_store_desc_),
                K(data_seq));
     } else {
-      is_closed_=false;
+      is_closed_ = false;
       datum_row_.row_flag_.set_flag(ObDmlFlag::DF_INSERT);
       datum_row_.mvcc_row_flag_.set_last_multi_version_row(true);
       datum_row_.storage_datums_[rowkey_column_num_].set_int(
@@ -963,12 +1205,13 @@ int ObLoadSSTableWriter::close() {
   } else {
     if (OB_FAIL(macro_block_writer_.close())) {
       LOG_WARN("fail to close macro block writer", KR(ret));
-    } else
+    } else {
       // 重置保证下次能够重用
       datum_row_.reset();
       macro_block_writer_.reset();
       is_closed_ = true;
     }
+  }
   return ret;
 }
 
@@ -1002,37 +1245,44 @@ ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (processed_) {
-    if (OB_FAIL(do_load())) {
-      LOG_WARN("fail to do process", KR(ret));
-    }
-  } else {
+  if (stage_process_) {
     if (OB_FAIL(do_process())) {
       LOG_WARN("fail to do load", KR(ret));
     }
-  }
-  return ret;
-}
-
-int ObLoadDataDirectDemo::init(ObLoadDataStmt &load_stmt, int64_t offset,
-                               int64_t end, bool processed,
-                               ObLoadExternalSort *external_sort,
-                               ObLoadSSTableWriter *sstable_writer) {
-  int ret = OB_SUCCESS;
-  processed_=processed;
-  external_sort_=external_sort;
-  sstable_writer_=sstable_writer;
-  if (!processed_) {
-    if (OB_FAIL(inner_init(load_stmt))) {
-      LOG_WARN("fail to init ObLoadDataDirectDemo", KR(ret));
-    } else {
-      ret = file_reader_.set_offset_end(offset, end);
+  } else {
+    if (OB_FAIL(do_load())) {
+      LOG_WARN("fail to do process", KR(ret));
     }
   }
   return ret;
 }
 
-int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
+int ObLoadDataDirectDemo::init(int64_t index, ObLoadDataStmt &load_stmt,
+                               int64_t offset, int64_t end, bool stage_process,
+                               ObLoadDispatcher *dispatcher,
+                               ObLoadSSTableWriter *sstable_writer) {
+  int ret = OB_SUCCESS;
+  index_=index;
+  stage_process_ = stage_process;
+  dispatcher_=dispatcher;
+  sstable_writer_ = sstable_writer;
+  if (stage_process_) {
+    if (OB_FAIL(inner_init_process(load_stmt))) {
+      LOG_WARN("fail to init ObLoadDataDirectDemo process", KR(ret));
+    } else if(OB_FAIL(file_reader_.set_offset_end(offset, end))){
+      LOG_WARN("fail to set offset and end", KR(ret));
+    }
+  } else {
+    if (OB_FAIL(inner_init_load(load_stmt))) {
+      LOG_WARN("fail to init ObLoadDataDirectDemo load", KR(ret));
+    } else if (OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
+      LOG_WARN("failed to init macro block writer", K(ret));
+    }
+  }
+  return ret;
+}
+
+int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
   const ObLoadArgument &load_args = load_stmt.get_load_arguments();
   const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
@@ -1070,13 +1320,48 @@ int ObLoadDataDirectDemo::inner_init(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to create buffer", KR(ret));
   }
   // init row_caster_
-  else if (OB_FAIL(
-               row_caster_.init(table_schema, field_or_var_list))) {
+  else if (OB_FAIL(row_caster_.init(table_schema, field_or_var_list))) {
     LOG_WARN("fail to init row caster", KR(ret));
   }
+  // init dispatcher_
+  else if (OB_FAIL(dispatcher_->init(table_schema))) {
+    LOG_WARN("fail to init dispatcher", KR(ret));
+  }
+  return ret;
+}
+
+int ObLoadDataDirectDemo::inner_init_load(ObLoadDataStmt &load_stmt) {
+  int ret = OB_SUCCESS;
+  const ObLoadArgument &load_args = load_stmt.get_load_arguments();
+  const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
+      load_stmt.get_field_or_var_list();
+  const uint64_t tenant_id = load_args.tenant_id_;
+  const uint64_t table_id = load_args.table_id_;
+  ObSchemaGetterGuard schema_guard;
+  const ObTableSchema *table_schema = nullptr;
+  if (OB_FAIL(
+          ObMultiVersionSchemaService::get_instance().get_tenant_schema_guard(
+              tenant_id, schema_guard))) {
+    LOG_WARN("fail to get tenant schema guard", KR(ret), K(tenant_id));
+  } else if (OB_FAIL(schema_guard.get_table_schema(tenant_id, table_id,
+                                                   table_schema))) {
+    LOG_WARN("fail to get table schema", KR(ret), K(tenant_id), K(table_id));
+  } else if (OB_ISNULL(table_schema)) {
+    ret = OB_TABLE_NOT_EXIST;
+    LOG_WARN("table not exist", KR(ret), K(tenant_id), K(table_id));
+  } else if (OB_UNLIKELY(table_schema->is_heap_table())) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_WARN("not support heap table", KR(ret));
+  }
+
+  // init dispatcher_
+  if (OB_FAIL(dispatcher_->init(table_schema))) {
+    LOG_WARN("fail to init dispatcher", KR(ret));
+  }
   // init external_sort_
-  else if (OB_FAIL(external_sort_->init(table_schema))) {
-    LOG_WARN("fail to init row caster", KR(ret));
+  else if (OB_FAIL(external_sort_.init(table_schema, MEM_BUFFER_SIZE,
+                                       FILE_BUFFER_SIZE))) {
+    LOG_WARN("fail to init external sort", KR(ret));
   }
   // init sstable_writer_
   else if (OB_FAIL(sstable_writer_->init(table_schema))) {
@@ -1117,15 +1402,16 @@ int ObLoadDataDirectDemo::do_process() {
           }
         } else if (OB_FAIL(row_caster_.get_casted_row(*new_row, datum_row))) {
           LOG_WARN("fail to cast row", KR(ret));
-        } else if (OB_FAIL(external_sort_->append_row(*datum_row))) {
+        } else if (OB_FAIL(dispatcher_->append_row(*datum_row))) {
           LOG_WARN("fail to append row", KR(ret));
         }
       }
     }
   }
+
   if (OB_SUCC(ret)) {
-    if (OB_FAIL(external_sort_->close())) {
-      LOG_WARN("fail to close external sort", KR(ret));
+    if (OB_FAIL(dispatcher_->close(index_))) {
+      LOG_WARN("fail to close dispatcher", KR(ret));
     }
   }
   return ret;
@@ -1134,8 +1420,30 @@ int ObLoadDataDirectDemo::do_process() {
 int ObLoadDataDirectDemo::do_load() {
   int ret = OB_SUCCESS;
   const ObLoadDatumRow *datum_row = nullptr;
+
   while (OB_SUCC(ret)) {
-    if (OB_FAIL(external_sort_->get_next_row(datum_row))) {
+    if (OB_FAIL(dispatcher_->get_next_row(index_,datum_row))) {
+      if (OB_UNLIKELY(OB_ITER_END != ret)) {
+        LOG_WARN("fail to get next row", KR(ret));
+      } else {
+        ret = OB_SUCCESS;
+        break;
+      }
+    } else if (OB_FAIL(external_sort_.append_row(*datum_row))) {
+      LOG_WARN("fail to append row", KR(ret));
+    } else {
+      dispatcher_->free(datum_row);
+    }
+  }
+
+  if (OB_SUCC(ret)) {
+    if (OB_FAIL(external_sort_.close())) {
+      LOG_WARN("fail to close external sort", KR(ret));
+    }
+  }
+
+  while (OB_SUCC(ret)) {
+    if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
       } else {
@@ -1144,11 +1452,15 @@ int ObLoadDataDirectDemo::do_load() {
       }
     } else if (OB_FAIL(sstable_writer_->append_row(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
+    } 
+  }
+
+  if (OB_SUCC(ret)) {
+    if (OB_FAIL(sstable_writer_->close())) {
+      LOG_WARN("fail to close sstable writer", KR(ret));
     }
   }
-  if (OB_FAIL(sstable_writer_->close())) {
-    LOG_WARN("fail to close sstable writer", KR(ret));
-  }
+
   return ret;
 }
 

@@ -1,13 +1,21 @@
 #pragma once
 
+#include "lib/container/ob_array.h"
+#include "lib/container/ob_se_array.h"
+#include "lib/container/ob_vector.h"
+#include "lib/thread/thread.h"
 #include "lib/file/ob_file.h"
+#include "lib/lock/ob_spin_lock.h"
 #include "lib/timezone/ob_timezone_info.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/cmd/ob_load_data_parser.h"
 #include "storage/blocksstable/ob_index_block_builder.h"
 #include "storage/ob_parallel_external_sort.h"
 #include "storage/tx_storage/ob_ls_handle.h"
-#include "lib/lock/ob_spin_lock.h"
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 
 namespace oceanbase {
 namespace sql {
@@ -16,6 +24,7 @@ static const int64_t MAX_RECORD_SIZE = (1LL << 20);  // 1M
 static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*(512LL+256LL);  // 768M
 // static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*128LL;  // 128M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
+static const int64_t SAMPLING_NUM = (1LL << 22);
 
 class ObLoadDataBuffer {
 public:
@@ -161,22 +170,19 @@ class ObLoadExternalSort {
 public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
-  int init(const share::schema::ObTableSchema *table_schema);
+  int init(const share::schema::ObTableSchema *table_schema, int64_t mem_size,
+           int64_t file_buf_size);
   int append_row(const ObLoadDatumRow &datum_row);
   int close();
-  int finish();
   int get_next_row(const ObLoadDatumRow *&datum_row);
-  int init_external_sort();
+
 private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
   ObLoadDatumRowCompare compare_;
-  static thread_local storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
-  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_all_;
-  static thread_local bool is_closed_;
+  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
+  bool is_closed_;
   bool is_inited_;
-  bool is_finished_;
-  common::ObSpinLock lock_;
 };
 
 class ObLoadSSTableWriter {
@@ -214,26 +220,77 @@ private:
   common::ObSpinLock lock_;
 };
 
+// 读取 csv 解析完的数据，然后分发到对应的外排
+// 首先会对数据进行采样划分范围
+// CSV->DISPATCH->EXTERNAL_SORT
+class ObLoadDispatcher {
+  typedef common::ObVector<ObLoadDatumRow *> LoadDatumRowVector;
+
+public:
+  // thread_num 指的是向 ObLoadDispatcher 提供数据的线程数量
+  // dispatch_num 指的是 ObLoadDispatcher 分发到外排桶的数量
+  ObLoadDispatcher(int thread_num, int dispatch_num);
+  ~ObLoadDispatcher();
+  int init(const ObTableSchema *table_schema);
+  int append_row(const ObLoadDatumRow &datum_row);
+  int get_next_row(int idx, const ObLoadDatumRow *&datum_row);
+  void free(const ObLoadDatumRow *&datum_row);
+  int close(int idx);
+
+private:
+  int do_dispatch_all();
+  int do_dispatch_one(const ObLoadDatumRow *item);
+  int do_stat();
+
+private:
+  common::ObSpinLock lock_;
+  bool is_inited_;
+  int thread_num_;
+  common::ObArray<bool> is_closed_;
+  bool is_finished_;
+
+  bool finish_smapling_;
+  bool finish_smapling_stat_;
+
+  common::ObArenaAllocator allocator_;
+  blocksstable::ObStorageDatumUtils datum_utils_;
+  ObLoadDatumRowCompare compare_;
+
+  std::atomic<int64_t> current_num_;
+  LoadDatumRowVector smapling_data_;
+  common::ObSpinLock smapling_data_lock;
+
+  int dispatch_num_;
+  common::ObSpinLock* dispatch_lock_[100];
+  common::ObArray<ObLoadDatumRow *> dispatch_point_;
+  common::ObArray<LoadDatumRowVector> dispatch_data_;
+};
+
+
 class ObLoadDataDirectDemo : public ObLoadDataBase {
 public:
   ObLoadDataDirectDemo();
   virtual ~ObLoadDataDirectDemo();
   int execute(ObExecContext &ctx, ObLoadDataStmt &load_stmt) override;
-  int init(ObLoadDataStmt &load_stmt, int64_t offset, int64_t end,
-           bool processed_, ObLoadExternalSort *external_sort,
-           ObLoadSSTableWriter *sstable_writer);
+  int init(int64_t index, ObLoadDataStmt & load_stmt, int64_t offset,
+           int64_t end, bool stage_process, ObLoadDispatcher *dispatcher,
+           ObLoadSSTableWriter *sstable_writer = nullptr);
+
 private:
-  int inner_init(ObLoadDataStmt &load_stmt);
+  int inner_init_process(ObLoadDataStmt &load_stmt); 
+  int inner_init_load(ObLoadDataStmt &load_stmt);
   int do_process();
   int do_load();
 
-private: 
-  bool processed_;
+private:
+  int64_t index_;
+  bool stage_process_;
   ObLoadSequentialFileReader file_reader_;
   ObLoadDataBuffer buffer_;
   ObLoadCSVPaser csv_parser_;
   ObLoadRowCaster row_caster_;
-  ObLoadExternalSort* external_sort_;
+  ObLoadDispatcher *dispatcher_;
+  ObLoadExternalSort external_sort_;
   ObLoadSSTableWriter* sstable_writer_;
 };
 

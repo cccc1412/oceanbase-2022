@@ -18,8 +18,8 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
     LOG_WARN("invalid argument", KP(buf), K(buf_size));
   } else {
     task =
-        new (buf) ObLoadDataDirectTask(ctx_, stmt_, offset_, end_, processed_,
-                                       external_sort_, sstable_writer_,index_);
+        new (buf) ObLoadDataDirectTask(index_, ctx_, stmt_, offset_, end_, stage_process_,
+                                       dispatcher_, sstable_writer_);
   }
   return task;
 }
@@ -30,13 +30,9 @@ int ObLoadDataDirectTask::process() {
   if (OB_ISNULL(load_direct = OB_NEWx(ObLoadDataDirectDemo, (&ctx_.get_allocator())))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("allocate memory failed", K(ret));
-  } else if (OB_FAIL(load_direct->init(stmt_, offset_, end_, processed_,
-                                       external_sort_, sstable_writer_))) {
+  } else if (OB_FAIL(load_direct->init(index_, stmt_, offset_, end_, stage_process_,
+                                       dispatcher_, sstable_writer_))) {
     LOG_WARN("failed to execute load data stmt", K(ret));
-  } else if (!processed_ && OB_FAIL(external_sort_->init_external_sort())) {
-    LOG_WARN("failed to init macro external sort", K(ret));
-  } else if (processed_ && OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
-    LOG_WARN("failed to init macro block writer", K(ret));
   } else {
     if (OB_FAIL(load_direct->execute(ctx_, stmt_))) {
       LOG_WARN("failed to execute load data stmt", K(ret));

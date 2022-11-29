@@ -17,7 +17,7 @@ public:
   virtual ~ObLoadDataDirectTaskQueue();
   int init(const int64_t thread_cnt, const int64_t queue_size,
            const char *thread_name = nullptr);
-  int push_task(const ObAsyncTask &task);
+  int push_task(const share::ObAsyncTask &task);
   void wait_task();
 protected:
   virtual void run2() final;

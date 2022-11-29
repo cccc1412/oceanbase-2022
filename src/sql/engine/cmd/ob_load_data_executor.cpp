@@ -11,10 +11,8 @@
  */
 
 #define USING_LOG_PREFIX SQL_ENG
-#include "lib/thread/ob_async_task_queue.h"
-#include "share/rc/ob_tenant_base.h"
-#include "sql/engine/cmd/ob_load_data_direct_task_queue.h"
 
+#include "share/rc/ob_tenant_base.h"
 #include "sql/engine/cmd/ob_load_data_executor.h"
 
 #include "lib/oblog/ob_log_module.h"
@@ -34,24 +32,45 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     return ret;
   }
 
-  ObLoadExternalSort external_sort;
+  ObLoadDispatcher dispatcher(PROCESS_THREAD_NUM, LOAD_THREAD_NUM);
   ObLoadSSTableWriter sstable_writer;
-  if (OB_FAIL(do_process(ctx, stmt, external_sort, sstable_writer))) {
+  if (OB_FAIL(do_execute(ctx, stmt, dispatcher, sstable_writer))) {
     LOG_WARN("do process fail", KR(ret));
-  } else if (OB_FAIL(do_load(ctx, stmt, external_sort, sstable_writer))) {
-    LOG_WARN("do load fail", KR(ret));
   } else {
     LOG_INFO("load data success");
   }
   return ret;
 }
 
-int ObLoadDataExecutor::do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
-                                   ObLoadExternalSort &external_sort,
+int ObLoadDataExecutor::do_execute(ObExecContext &ctx, ObLoadDataStmt &stmt,
+                                   ObLoadDispatcher &dispatcher,
+                                   ObLoadSSTableWriter &sstable_writer) {
+  int ret = OB_SUCCESS;
+  ObLoadDataDirectTaskQueue process_async_tq;
+  ObLoadDataDirectTaskQueue load_async_tq;
+  if (OB_FAIL(do_process(process_async_tq, ctx, stmt, dispatcher,
+                         sstable_writer))) {
+    LOG_WARN("do process fail", KR(ret));
+  } else if (OB_FAIL(do_load(load_async_tq, ctx, stmt, dispatcher,
+                             sstable_writer))) {
+    LOG_WARN("do load fail", KR(ret));
+  } else {
+    process_async_tq.wait_task();
+    process_async_tq.stop();
+    process_async_tq.wait();
+    load_async_tq.wait_task();
+    load_async_tq.stop();
+    load_async_tq.wait();
+  }
+  return ret;
+}
+
+int ObLoadDataExecutor::do_process(ObLoadDataDirectTaskQueue &async_tq,
+                                   ObExecContext &ctx, ObLoadDataStmt &stmt,
+                                   ObLoadDispatcher &dispatcher,
                                    ObLoadSSTableWriter &sstable_writer) {
   int ret = OB_SUCCESS;
   struct stat st;
-  ObLoadDataDirectTaskQueue async_tq;
   async_tq.set_run_wrapper(MTL_CTX());
   if (stat(stmt.get_load_arguments().file_name_.ptr(), &st) < 0) {
     LOG_WARN("cannot load file");
@@ -63,54 +82,48 @@ int ObLoadDataExecutor::do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
     LOG_WARN("cannot start async_tq", KR(ret));
   } else {
     off64_t size = st.st_size;
-    int64_t offset = 0;
-    while (offset < size) {
-      ObLoadDataDirectTask ObLDDT(ctx, stmt, offset, offset + FILE_SPILT_SIZE,
-                                  false, &external_sort, &sstable_writer);
-      ObLDDT.set_retry_interval(1000LL*1000LL*10LL);
+    int64_t spilt_size = size/PROCESS_THREAD_NUM;
+    for (int i = 0; i < PROCESS_THREAD_NUM; i++) {
+      int64_t offset = spilt_size*i;
+      int64_t end = spilt_size * (i + 1);
+      ObLoadDataDirectTask ObLDDT(i, ctx, stmt, offset,
+                                  end, true, &dispatcher,
+                                  &sstable_writer);
+      ObLDDT.set_retry_interval(1000LL * 1000LL * 10LL);
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
-        goto out;
-      };
-      offset += FILE_SPILT_SIZE;
+        break;
+      }
     }
-    async_tq.wait_task();
   }
-out:
-  async_tq.stop();
-  async_tq.wait();
   return ret;
 }
 
-int ObLoadDataExecutor::do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
-                 ObLoadExternalSort &external_sort,
-                 ObLoadSSTableWriter &sstable_writer) {
+int ObLoadDataExecutor::do_load(ObLoadDataDirectTaskQueue &async_tq,
+                                ObExecContext &ctx, ObLoadDataStmt &stmt,
+                                ObLoadDispatcher &dispatcher,
+                                ObLoadSSTableWriter &sstable_writer) {
   int ret = OB_SUCCESS;
-  ObLoadDataDirectTaskQueue async_tq;
   async_tq.set_run_wrapper(MTL_CTX());
-  if (OB_FAIL(external_sort.finish())) {
-      LOG_WARN("cannot close sort", KR(ret));
-  } else if (OB_FAIL(async_tq.init(IO_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
+  if (OB_FAIL(async_tq.init(LOAD_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
     LOG_WARN("cannot init async_tq", KR(ret));
   } else if (OB_FAIL(async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));
   } else {
-    for (int i = 0; i < IO_THREAD_NUM; i++) {
-      ObLoadDataDirectTask ObLDDT(ctx, stmt, 0, 0, true, &external_sort,
-                                  &sstable_writer,i);
+    for (int i = 0; i < LOAD_THREAD_NUM; i++) {
+      ObLoadDataDirectTask ObLDDT(i, ctx, stmt, 0, 0, false, &dispatcher,
+                                  &sstable_writer);
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
-        goto out;
-      };
+        break;
+      }
     }
-    async_tq.wait_task();
   }
-  if (OB_FAIL(sstable_writer.finish())) {
-    LOG_WARN("cannot close sstable", KR(ret));
+  if (OB_SUCC(ret)) {
+    if (OB_FAIL(sstable_writer.finish())) {
+      LOG_WARN("cannot close sstable", KR(ret));
+    }
   }
-out:
-  async_tq.stop();
-  async_tq.wait();
   return ret;
 }
 

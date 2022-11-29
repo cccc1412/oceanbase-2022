@@ -13,7 +13,9 @@
 #ifndef OCEANBASE_LOAD_DATA_EXECUTOR_H_
 #define OCEANBASE_LOAD_DATA_EXECUTOR_H_
 #include "sql/engine/cmd/ob_load_data_direct_demo.h"
+#include "sql/engine/cmd/ob_load_data_direct_task_queue.h"
 #include "sql/resolver/cmd/ob_load_data_stmt.h"
+
 namespace oceanbase
 {
 namespace sql
@@ -23,7 +25,7 @@ class ObLoadDataExecutor {
   static const int64_t FILE_SPILT_SIZE = 2LL * 1024LL * 1024LL * 1024LL;
   // static const int64_t FILE_SPILT_SIZE = 1LL * 1024LL * 1024LL * 256LL;
   static const int64_t PROCESS_THREAD_NUM = 10;
-  static const int64_t IO_THREAD_NUM=1;
+  static const int64_t LOAD_THREAD_NUM=1;
 public:
   ObLoadDataExecutor() {}
   virtual ~ObLoadDataExecutor() {}
@@ -34,11 +36,14 @@ private:
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataExecutor);
   // function members
 private:
-  int do_process(ObExecContext &ctx, ObLoadDataStmt &stmt,
-                 ObLoadExternalSort &external_sort,
+  int do_execute(ObExecContext &ctx, ObLoadDataStmt &stmt,
+                 ObLoadDispatcher &dispatcher,
                  ObLoadSSTableWriter &sstable_writer);
-  int do_load(ObExecContext &ctx, ObLoadDataStmt &stmt,
-              ObLoadExternalSort &external_sort,
+  int do_process(ObLoadDataDirectTaskQueue &async_tq, ObExecContext &ctx,
+                 ObLoadDataStmt &stmt, ObLoadDispatcher &dispatcher,
+                 ObLoadSSTableWriter &sstable_writer);
+  int do_load(ObLoadDataDirectTaskQueue &async_tq, ObExecContext &ctx,
+              ObLoadDataStmt &stmt, ObLoadDispatcher &dispatcher,
               ObLoadSSTableWriter &sstable_writer);
 };
 

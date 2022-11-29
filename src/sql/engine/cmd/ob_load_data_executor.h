@@ -22,10 +22,8 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t FILE_SPILT_SIZE = 2LL * 1024LL * 1024LL * 1024LL;
-  // static const int64_t FILE_SPILT_SIZE = 1LL * 1024LL * 1024LL * 256LL;
-  static const int64_t PROCESS_THREAD_NUM = 3;
-  static const int64_t LOAD_THREAD_NUM=3;
+  static const int64_t PROCESS_THREAD_NUM = 4;
+  static const int64_t LOAD_THREAD_NUM=8;
 public:
   ObLoadDataExecutor() {}
   virtual ~ObLoadDataExecutor() {}

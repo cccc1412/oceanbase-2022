@@ -20,6 +20,9 @@ thread_local blocksstable::ObMacroBlockWriter
     ObLoadSSTableWriter::macro_block_writer_;
 thread_local blocksstable::ObDatumRow ObLoadSSTableWriter::datum_row_;
 thread_local bool ObLoadSSTableWriter::is_closed_ = false;
+
+thread_local blocksstable::ObDatumRowkey ObLoadDatumRowCompare::lhs_rowkey_;
+thread_local blocksstable::ObDatumRowkey ObLoadDatumRowCompare::rhs_rowkey_;
 /**
  * ObLoadDataBuffer
  */
@@ -686,11 +689,11 @@ int ObLoadDispatcher::do_dispatch_one(const ObLoadDatumRow *item) {
     for (size_t j = 1; j < dispatch_size; j++) {
       if (!compare_(item, dispatch_point_[j - 1]) &&
           compare_(item, dispatch_point_[j])) {
-        if (OB_FAIL(dispatch_lock_[0]->lock())) {
+        if (OB_FAIL(dispatch_lock_[j]->lock())) {
           LOG_WARN("fail to lock", KR(ret));
-        } else if (OB_FAIL(dispatch_data_[0].push_back(item))) {
+        } else if (OB_FAIL(dispatch_data_[j].push_back(item))) {
           LOG_WARN("fail to push back", KR(ret));
-        } else if (OB_FAIL(dispatch_lock_[0]->unlock())) {
+        } else if (OB_FAIL(dispatch_lock_[j]->unlock())) {
           LOG_WARN("fail to unlock", KR(ret));
         }
         break;
@@ -708,8 +711,8 @@ int ObLoadDispatcher::do_stat() {
   } else {
     int split_point_num = dispatch_num_ - 1;
     for (int i = 0; i < split_point_num && OB_SUCC(ret); i++) {
-      int index = SAMPLING_NUM / (split_point_num - 1) * i;
-      const ObLoadDatumRow &datum_row = *smapling_data_.at(i);
+      int index = (current_num_-1) / (split_point_num - 1) * i;
+      const ObLoadDatumRow &datum_row = *smapling_data_.at(index);
       char *buf = NULL;
       ObLoadDatumRow *new_item = NULL;
       const int64_t item_size =
@@ -758,49 +761,42 @@ int ObLoadDispatcher::append_row(const ObLoadDatumRow &datum_row) {
   const int64_t item_size =
       sizeof(ObLoadDatumRow) + datum_row.get_deep_copy_size();
 
-  {
-    LockGuard guard(lock_);
-    if (OB_ISNULL(buf = static_cast<char *>(allocator_.alloc(item_size)))) {
-      ret = common::OB_ALLOCATE_MEMORY_FAILED;
-      LOG_WARN("fail to allocate memory", K(ret), K(item_size));
-    }
-  }
-
-  if (OB_SUCC(ret)) {
-    if (OB_ISNULL(new_item = new (buf) ObLoadDatumRow())) {
-      ret = common::OB_ALLOCATE_MEMORY_FAILED;
-      LOG_WARN("fail to placement new item", K(ret));
+  if (OB_ISNULL(buf = static_cast<char *>(ob_malloc(item_size,ObMemAttr(MTL_ID(),"dispatcher"))))) {
+    ret = common::OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("fail to allocate memory", K(ret), K(item_size));
+  } else if (OB_ISNULL(new_item = new (buf) ObLoadDatumRow())) {
+    ret = common::OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("fail to placement new item", K(ret));
+  } else {
+    int64_t buf_pos = sizeof(ObLoadDatumRow);
+    if (OB_FAIL(new_item->deep_copy(datum_row, buf, item_size, buf_pos))) {
+      LOG_WARN("fail to deep copy item", K(ret));
     } else {
-      int64_t buf_pos = sizeof(ObLoadDatumRow);
-      if (OB_FAIL(new_item->deep_copy(datum_row, buf, item_size, buf_pos))) {
-        LOG_WARN("fail to deep copy item", K(ret));
-      } else {
-        while (current_num_ >= SAMPLING_NUM)
-          sleep(1);
-        LockGuard guard(smapling_data_lock_);
-        // 采样完成后，数据直接分发对应的桶内
-        if (finish_smapling_) {
-          if (OB_FAIL(do_dispatch_one(new_item))) {
-            LOG_WARN("fail to do dispatch one", KR(ret));
-          } else {
-            current_num_++;
-          }
+      while (current_num_ >= SAMPLING_NUM)
+        sleep(1);
+      LockGuard guard(smapling_data_lock_);
+      // 采样完成后，数据直接分发对应的桶内
+      if (finish_smapling_) {
+        if (OB_FAIL(do_dispatch_one(new_item))) {
+          LOG_WARN("fail to do dispatch one", KR(ret));
+        } else {
+          current_num_++;
         }
-        // 采样未完成，数据放到对应采样数组内，采样结束后再分发到对应的桶内
-        else {
-          if (OB_FAIL(smapling_data_.push_back(new_item))) {
-            LOG_WARN("fail to do push back", KR(ret));
-          } else {
-            current_num_++;
-            if (current_num_ >= SAMPLING_NUM) {
-              finish_smapling_ = true;
-              if (OB_FAIL(do_stat())) {
-                LOG_WARN("fail to do stat", KR(ret));
-              } else if (OB_FAIL(do_dispatch_all())) {
-                LOG_WARN("fail to do dispatch all", KR(ret));
-              } else {
-                finish_smapling_stat_ = true;
-              }
+      }
+      // 采样未完成，数据放到对应采样数组内，采样结束后再分发到对应的桶内
+      else {
+        if (OB_FAIL(smapling_data_.push_back(new_item))) {
+          LOG_WARN("fail to do push back", KR(ret));
+        } else {
+          current_num_++;
+          if (current_num_ >= SAMPLING_NUM || is_finished_) {
+            finish_smapling_ = true;
+            if (OB_FAIL(do_stat())) {
+              LOG_WARN("fail to do stat", KR(ret));
+            } else if (OB_FAIL(do_dispatch_all())) {
+              LOG_WARN("fail to do dispatch all", KR(ret));
+            } else {
+              finish_smapling_stat_ = true;
             }
           }
         }
@@ -836,8 +832,7 @@ int ObLoadDispatcher::get_next_row(int idx, const ObLoadDatumRow *&datum_row) {
 }
 
 void ObLoadDispatcher::free(const ObLoadDatumRow *&datum_row) {
-  LockGuard guard(lock_); 
-  allocator_.free((void *)datum_row);
+  ob_free((void *)datum_row);
   datum_row = nullptr;
   current_num_--;
 }
@@ -1277,8 +1272,6 @@ int ObLoadDataDirectDemo::init(int64_t index, ObLoadDataStmt &load_stmt,
   } else {
     if (OB_FAIL(inner_init_load(load_stmt))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo load", KR(ret));
-    } else if (OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
-      LOG_WARN("failed to init macro block writer", K(ret));
     }
   }
   return ret;
@@ -1369,6 +1362,10 @@ int ObLoadDataDirectDemo::inner_init_load(ObLoadDataStmt &load_stmt) {
   else if (OB_FAIL(sstable_writer_->init(table_schema))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
+  // init macro_block_writer_
+  else if (OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
+    LOG_WARN("failed to init macro block writer", K(ret));
+  }
   return ret;
 }
 
@@ -1422,6 +1419,7 @@ int ObLoadDataDirectDemo::do_process() {
 int ObLoadDataDirectDemo::do_load() {
   int ret = OB_SUCCESS;
   const ObLoadDatumRow *datum_row = nullptr;
+  int count=0;
 
   while (OB_SUCC(ret)) {
     if (OB_FAIL(dispatcher_->get_next_row(index_, datum_row))) {
@@ -1434,6 +1432,7 @@ int ObLoadDataDirectDemo::do_load() {
     } else if (OB_FAIL(external_sort_.append_row(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
     } else {
+      count++;
       dispatcher_->free(datum_row);
     }
   }

@@ -79,7 +79,7 @@ int ObLoadDataExecutor::do_process(ObLoadDataDirectTaskQueue &async_tq,
     LOG_WARN("cannot load file");
     ret = OB_FILE_NOT_OPENED;
   } else if (OB_FAIL(
-                 async_tq.init(PROCESS_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
+                 async_tq.init(PROCESS_THREAD_NUM, 1 << 10, "ObLoadData1"))) {
     LOG_WARN("cannot init async_tq", KR(ret));
   } else if (OB_FAIL(async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));
@@ -108,7 +108,7 @@ int ObLoadDataExecutor::do_load(ObLoadDataDirectTaskQueue &async_tq,
                                 ObLoadSSTableWriter &sstable_writer) {
   int ret = OB_SUCCESS;
   async_tq.set_run_wrapper(MTL_CTX());
-  if (OB_FAIL(async_tq.init(LOAD_THREAD_NUM, 1 << 10, "ObLoadDataExe"))) {
+  if (OB_FAIL(async_tq.init(LOAD_THREAD_NUM, 1 << 10, "ObLoadData2"))) {
     LOG_WARN("cannot init async_tq", KR(ret));
   } else if (OB_FAIL(async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));

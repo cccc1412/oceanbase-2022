@@ -128,8 +128,8 @@ public:
 private:
   int64_t rowkey_column_num_;
   const blocksstable::ObStorageDatumUtils *datum_utils_;
-  blocksstable::ObDatumRowkey lhs_rowkey_;
-  blocksstable::ObDatumRowkey rhs_rowkey_;
+  static thread_local blocksstable::ObDatumRowkey lhs_rowkey_;
+  static thread_local blocksstable::ObDatumRowkey rhs_rowkey_;
   bool is_inited_;
 };
 

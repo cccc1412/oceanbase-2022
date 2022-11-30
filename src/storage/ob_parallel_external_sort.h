@@ -14,6 +14,8 @@
 #define OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
 
 #include "blocksstable/ob_block_manager.h"
+#include "lib/ob_errno.h"
+#include "lib/oblog/ob_log_module.h"
 #include "share/ob_define.h"
 #include "lib/container/ob_array.h"
 #include "lib/container/ob_se_array.h"
@@ -24,7 +26,9 @@
 #include "blocksstable/ob_block_sstable_struct.h"
 #include "blocksstable/ob_tmp_file.h"
 #include "share/config/ob_server_config.h"
-
+#include "lib/compress/lz4/ob_lz4_compressor.h"
+#include <cstdint>
+#include <cstring>
 
 namespace oceanbase
 {
@@ -94,7 +98,7 @@ public:
   ObMacroBufferWriter();
   virtual ~ObMacroBufferWriter();
   int write_item(const T &item);
-  void assign(const int64_t buf_pos, const int64_t buf_cap, char *buf);
+  int assign(const int64_t buf_pos, const int64_t buf_cap, char *buf);
   int serialize_header();
   bool has_item();
   int64_t size();
@@ -147,11 +151,12 @@ int ObMacroBufferWriter<T>::serialize_header()
 }
 
 template<typename T>
-void ObMacroBufferWriter<T>::assign(const int64_t pos, const int64_t buf_cap, char *buf)
+int ObMacroBufferWriter<T>::assign(const int64_t pos, const int64_t buf_cap, char *buf)
 {
   buf_pos_ = pos;
   buf_cap_ = buf_cap;
   buf_ = buf;
+  return OB_SUCCESS;
 }
 
 template<typename T>
@@ -184,7 +189,9 @@ private:
 private:
   bool is_inited_;
   char *buf_;
+  char *compress_buf_;
   int64_t buf_size_;
+  int64_t compress_buf_size_;
   int64_t expire_timestamp_;
   common::ObArenaAllocator allocator_;
   ObMacroBufferWriter<T> macro_buffer_writer_;
@@ -196,6 +203,7 @@ private:
   uint64_t tenant_id_;
   int64_t current_size_;
   common::ObArray<int64_t> parallel_start_offsets_;
+  common::ObLZ4Compressor191 compressor_;
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
 public:
   const common::ObArray<int64_t> &parallel_start_offsets() {
@@ -205,7 +213,7 @@ public:
 
 template<typename T>
 ObFragmentWriterV2<T>::ObFragmentWriterV2()
-  : is_inited_(false), buf_(NULL), buf_size_(0), expire_timestamp_(0),
+  : is_inited_(false), buf_(NULL),compress_buf_(NULL), buf_size_(0), expire_timestamp_(0),
     allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
     macro_buffer_writer_(), has_sample_item_(false), sample_item_(),
     file_io_handle_(), fd_(-1), dir_id_(-1), tenant_id_(common::OB_INVALID_ID), current_size_(0), parallel_start_offsets_()
@@ -242,10 +250,15 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size, const int64_t expire_tim
         (buf_ = static_cast<char *>(allocator_.alloc(align_buf_size)))) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to allocate buffer", K(ret), K(align_buf_size));
+    } else if(NULL == 
+        (compress_buf_ = static_cast<char *>(allocator_.alloc(align_buf_size + align_buf_size / 255 + 32)))) {
+       ret = common::OB_ALLOCATE_MEMORY_FAILED;
+      STORAGE_LOG(WARN, "fail to allocate buffer", K(ret), K(align_buf_size));
     } else if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.open(fd_, dir_id_))) {
       STORAGE_LOG(WARN, "fail to open file", K(ret));
     } else {
       buf_size_ = align_buf_size;
+      compress_buf_size_ = align_buf_size + align_buf_size / 255 + 32;
       expire_timestamp_ = expire_timestamp;
       macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH,
                                   buf_size_, buf_);
@@ -310,6 +323,8 @@ int ObFragmentWriterV2<T>::flush_buffer()
 {
   int ret = common::OB_SUCCESS;
   int64_t timeout_ms = 0;
+  int64_t compress_size = 0;
+  
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObFragmentWriterV2 has not been inited", K(ret));
@@ -317,15 +332,21 @@ int ObFragmentWriterV2<T>::flush_buffer()
     STORAGE_LOG(WARN, "fail to get io timeout ms", K(ret), K(expire_timestamp_));
   } else if (OB_FAIL(file_io_handle_.wait(timeout_ms))) {
     STORAGE_LOG(WARN, "fail to wait io finish", K(ret));
+  } else if(OB_FAIL(compressor_.compress(buf_ + 8, macro_buffer_writer_.size() - 8, compress_buf_ + 8, buf_size_ + buf_size_ / 255 + 32, compress_size))){
+    STORAGE_LOG(WARN, "fail to compress", K(compress_size), K(buf_size_));
+  } else if(OB_FAIL(macro_buffer_writer_.assign(compress_size + ObExternalSortConstant::BUF_HEADER_LENGTH, compress_size, compress_buf_))) {
+    STORAGE_LOG(WARN, "faile to assign macro buffer writer");
   } else if (OB_FAIL(macro_buffer_writer_.serialize_header())) {
     STORAGE_LOG(WARN, "fail to serialize header", K(ret));
   } else {
     blocksstable::ObTmpFileIOInfo io_info;
     io_info.fd_ = fd_;
     io_info.dir_id_ = dir_id_;
-    io_info.size_ = buf_size_;
+    //io_info.size_ = buf_size_;
+    io_info.size_ = buf_size_ / 3;
     io_info.tenant_id_ = tenant_id_;
-    io_info.buf_ = buf_;
+    //io_info.buf_ = buf_;
+    io_info.buf_ = compress_buf_;
     io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
     io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_WRITE);
     if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
@@ -391,6 +412,7 @@ void ObFragmentWriterV2<T>::reset()
 {
   is_inited_ = false;
   buf_ = NULL;
+  compress_buf_ = NULL;
   buf_size_ = 0;
   expire_timestamp_ = 0;
   allocator_.reuse();
@@ -415,7 +437,9 @@ public:
   void assign(const int64_t buf_pos, const int64_t buf_cap, const char *buf);
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 private:
+  common::ObLZ4Compressor191 compressor_;
   const char *buf_;
+  char *decompress_buf_;
   int64_t buf_pos_;
   int64_t buf_len_;
   int64_t buf_cap_;
@@ -423,13 +447,17 @@ private:
 
 template<typename T>
 ObMacroBufferReader<T>::ObMacroBufferReader()
-  : buf_(NULL), buf_pos_(0), buf_len_(0), buf_cap_(0)
+  : buf_(NULL), decompress_buf_(NULL) ,buf_pos_(0), buf_len_(0), buf_cap_(0)
 {
+  decompress_buf_ = new char[3*2LL<<20];
 }
 
 template<typename T>
 ObMacroBufferReader<T>::~ObMacroBufferReader()
 {
+  if(decompress_buf_ != nullptr) {
+    delete decompress_buf_;
+  }
 }
 
 template<typename T>
@@ -440,6 +468,11 @@ int ObMacroBufferReader<T>::read_item(T &item)
     if (OB_FAIL(deserialize_header())) {
       STORAGE_LOG(WARN, "fail to deserialize header");
     }
+    int64_t decompress_size = 0;
+    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,3*2LL<<20, decompress_size);
+    memcpy(decompress_buf_, buf_, 8);
+    buf_ = decompress_buf_;
+    buf_len_ = decompress_size + 8;
   }
   if (OB_SUCC(ret)) {
     if (buf_pos_ == buf_len_) {
@@ -576,7 +609,7 @@ int ObFragmentReaderV2<T>::init(
       dir_id_ = dir_id;
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
-      buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
+      buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) / 3;
       is_inited_ = true;
     }
   }

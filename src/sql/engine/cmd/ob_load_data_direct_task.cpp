@@ -4,9 +4,9 @@
 #include "lib/utility/ob_macro_utils.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/ob_exec_context.h"
-
+#include <sys/sysinfo.h>
 #define USING_LOG_PREFIX SQL_ENG
-
+#include <sched.h>
 using namespace oceanbase::sql;
 using namespace oceanbase::share;
 using namespace oceanbase::common;
@@ -26,6 +26,14 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
 
 int ObLoadDataDirectTask::process() {
   int ret = OB_SUCCESS;
+  //cpu_set_t mask;  //CPU核的集合
+  //cpu_set_t get;   //获取在集合中的CPU
+  //CPU_ZERO(&mask);    //置空
+  //CPU_SET(index_ % get_nprocs(),&mask);   //设置亲和力值
+  //if(sched_setaffinity(0, sizeof(mask), &mask)) {
+  //  LOG_WARN("warning ! set affinity failed!");      
+  //}
+
   ObLoadDataDirectDemo *load_direct=nullptr;
   if (OB_ISNULL(load_direct = OB_NEWx(ObLoadDataDirectDemo, (&ctx_.get_allocator())))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;

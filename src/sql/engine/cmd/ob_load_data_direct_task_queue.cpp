@@ -3,6 +3,7 @@
 #include "sql/engine/cmd/ob_load_data_direct_task_queue.h"
 #include "lib/oblog/ob_log_module.h"
 
+
 using namespace oceanbase::sql;
 using namespace oceanbase::share;
 using namespace oceanbase::lib;
@@ -35,6 +36,7 @@ int ObLoadDataDirectTaskQueue::init(const int64_t thread_cnt,
 
 void ObLoadDataDirectTaskQueue::run2() {
   int ret = OB_SUCCESS;
+
   ObTenantStatEstGuard stat_est_gurad(MTL_ID());
   ObTenantBase *tenant_base=MTL_CTX();
   Worker::CompatMode mode = ((ObTenant *)tenant_base)->get_compat_mode();

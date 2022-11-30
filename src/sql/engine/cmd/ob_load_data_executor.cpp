@@ -84,6 +84,7 @@ int ObLoadDataExecutor::do_process(ObLoadDataDirectTaskQueue &async_tq,
   } else if (OB_FAIL(async_tq.start())) {
     LOG_WARN("cannot start async_tq", KR(ret));
   } else {
+    int task_id = 0;
     off64_t size = st.st_size;
     int64_t spilt_size = size/PROCESS_THREAD_NUM;
     for (int i = 0; i < PROCESS_THREAD_NUM; i++) {

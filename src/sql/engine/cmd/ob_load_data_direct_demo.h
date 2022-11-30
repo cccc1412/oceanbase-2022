@@ -58,6 +58,7 @@ public:
   int set_offset_end(int64_t offset, int64_t end);
 
 private:
+  char buf_[MAX_RECORD_SIZE];
   common::ObFileReader file_reader_;
   int64_t offset_;
   int64_t end_;

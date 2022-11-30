@@ -101,16 +101,15 @@ int ObLoadSequentialFileReader::open(const ObString &filepath) {
 
 int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
   int ret = OB_SUCCESS;
-  char buf[MAX_RECORD_SIZE];
 
   int64_t read_size = 0;
-  memset(buf, 0, MAX_RECORD_SIZE);
-  if (OB_FAIL(file_reader_.pread(buf, MAX_RECORD_SIZE, end, read_size))) {
+  //memset(buf_, 0, MAX_RECORD_SIZE);
+  if (OB_FAIL(file_reader_.pread(buf_, MAX_RECORD_SIZE, end, read_size))) {
     LOG_WARN("fail to do pread", KR(ret));
     goto out;
   } else {
     int64_t i = 0;
-    while (i < read_size && buf[i] != '\n') {
+    while (i < read_size && buf_[i] != '\n') {
       i++;
       end++;
     }
@@ -119,13 +118,13 @@ int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
 
   if (offset != 0) {
     read_size = 0;
-    memset(buf, 0, MAX_RECORD_SIZE);
-    if (OB_FAIL(file_reader_.pread(buf, MAX_RECORD_SIZE, offset, read_size))) {
+    //memset(buf_, 0, MAX_RECORD_SIZE);
+    if (OB_FAIL(file_reader_.pread(buf_, MAX_RECORD_SIZE, offset, read_size))) {
       LOG_WARN("fail to do pread", KR(ret));
       goto out;
     } else {
       int64_t i = 0;
-      while (i < read_size && buf[i] != '\n') {
+      while (i < read_size && buf_[i] != '\n') {
         i++;
         offset++;
       }

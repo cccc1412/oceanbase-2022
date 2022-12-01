@@ -482,6 +482,7 @@ int64_t ObMacroBufferReader<T>::get_next_buf_size() {
   buf_len_ = decompress_size + 8;
   int64_t next_buf_len = 0;
   deserialize_next_header(next_buf_start, next_buf_len);
+  if(next_buf_len < 0 || next_buf_len > decompress_size) return -1;
   return next_buf_len;
 }
 

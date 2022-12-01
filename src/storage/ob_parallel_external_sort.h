@@ -363,7 +363,6 @@ int ObFragmentWriterV2<T>::flush_buffer()
     } else {
       io_info.size_ = compress_size + 16;
     }
-    assert(io_info.size_ > 8);
     io_info.tenant_id_ = tenant_id_;
     //io_info.buf_ = buf_;
     io_info.buf_ = compress_buf_;
@@ -409,6 +408,18 @@ int ObFragmentWriterV2<T>::sync()
     } else if (need_flush) {
       if (OB_FAIL(flush_buffer())) {
         STORAGE_LOG(WARN, "fail to flush buffer", K(ret));
+      }
+      int64_t data_end = 0;
+      blocksstable::ObTmpFileIOInfo io_info;
+      io_info.fd_ = fd_;
+      io_info.dir_id_ = dir_id_;
+      io_info.size_ = 8;
+      io_info.tenant_id_ = tenant_id_;
+      io_info.buf_ = (char*)&data_end;
+      io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
+      io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_WRITE);
+      if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
+        STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
       }
     }
     if (OB_SUCC(ret)) {

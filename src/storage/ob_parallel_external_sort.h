@@ -145,19 +145,16 @@ int ObMacroBufferWriter<T>::serialize_header(bool is_first_write)
   if (OB_FAIL(common::serialization::encode_i64(buf_, header_size, tmp_pos_, buf_pos_))) {
     STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos_),
         K(header_size), K(buf_pos_));
-  } else if(OB_FAIL(common::serialization::encode_i64(buf_, header_size, tmp_pos_, buf_pos_))) {
-    STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos_),
-        K(header_size), K(buf_pos_));
   } else{
     STORAGE_LOG(DEBUG, "serialize header success", K(tmp_pos_), K(buf_pos_));
   }
   int64_t tmp_pos2_ = 0;
-  if(unlikely(is_first_write)) {
+  if(likely(!is_first_write)) {
     if(OB_FAIL(common::serialization::encode_i64(buf_+8, header_size, tmp_pos2_, buf_pos_))) {
-      STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos_),
+      STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos2_),
           K(header_size), K(buf_pos_));
     } else{
-      STORAGE_LOG(DEBUG, "serialize header success", K(tmp_pos_), K(buf_pos_));
+      STORAGE_LOG(DEBUG, "serialize header success", K(tmp_pos2_), K(buf_pos_));
     }
   }
   return ret;
@@ -354,7 +351,7 @@ int ObFragmentWriterV2<T>::flush_buffer()
   } else if(OB_FAIL(macro_buffer_writer_.assign(compress_size + 8, compress_size, compress_buf_))) {
     STORAGE_LOG(WARN, "faile to assign macro buffer writer");
   } else if (OB_FAIL(macro_buffer_writer_.serialize_header(is_first_write_))) {
-    STORAGE_LOG(WARN, "fail to serialize header", K(ret));
+    STORAGE_LOG(WARN, "fail to serialize header", K(ret), K(is_first_write_));
   } else {
     blocksstable::ObTmpFileIOInfo io_info;
     io_info.fd_ = fd_;
@@ -366,6 +363,7 @@ int ObFragmentWriterV2<T>::flush_buffer()
     } else {
       io_info.size_ = compress_size + 16;
     }
+    assert(io_info.size_ > 8);
     io_info.tenant_id_ = tenant_id_;
     //io_info.buf_ = buf_;
     io_info.buf_ = compress_buf_;
@@ -440,6 +438,7 @@ void ObFragmentWriterV2<T>::reset()
   allocator_.reuse();
   macro_buffer_writer_.assign(0, 0, NULL);
   has_sample_item_ = false;
+  is_first_write_ = true;
   file_io_handle_.reset();
   fd_ = -1;
   dir_id_ = -1;
@@ -458,7 +457,7 @@ public:
   int deserialize_header();
   int deserialize_next_header(char *buf, int64_t &next_buf_len);
   void assign(const int64_t buf_pos, const int64_t buf_cap, const char *buf);
-  int64_t get_next_buf_size() { return next_buf_len_;}
+  int64_t get_next_buf_size();
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 private:
   common::ObLZ4Compressor191 compressor_;
@@ -467,8 +466,24 @@ private:
   int64_t buf_pos_;
   int64_t buf_len_;
   int64_t buf_cap_;
-  int64_t next_buf_len_;
 };
+
+template<typename T>
+int64_t ObMacroBufferReader<T>::get_next_buf_size() {
+  int ret = deserialize_header();
+  if(buf_len_ < 0) {
+    STORAGE_LOG(WARN, "deserialize header failed");
+  }
+  int64_t decompress_size = 0;
+  compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,3*2LL<<20, decompress_size);
+  char *next_buf_start = const_cast<char*>(buf_) + buf_len_;
+  memcpy(decompress_buf_, buf_, 8);
+  buf_ = decompress_buf_;
+  buf_len_ = decompress_size + 8;
+  int64_t next_buf_len = 0;
+  deserialize_next_header(next_buf_start, next_buf_len);
+  return next_buf_len;
+}
 
 template<typename T>
 ObMacroBufferReader<T>::ObMacroBufferReader()
@@ -489,22 +504,22 @@ template<typename T>
 int ObMacroBufferReader<T>::read_item(T &item)
 {
   int ret = common::OB_SUCCESS;
-  if (0 == buf_len_) {
-    if (OB_FAIL(deserialize_header())) {
-      STORAGE_LOG(WARN, "fail to deserialize header");
-    }
-    int64_t decompress_size = 0;
-    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,3*2LL<<20, decompress_size);
-    char *next_buf_start = const_cast<char*>(buf_) + buf_len_;
-    memcpy(decompress_buf_, buf_, 8);
-    buf_ = decompress_buf_;
-    buf_len_ = decompress_size + 8;
-    next_buf_len_ = 0;
-    if(OB_FAIL(deserialize_next_header(next_buf_start, next_buf_len_))) {
-      STORAGE_LOG(WARN, "fail to deserialize next header");
-    }
-    STORAGE_LOG(INFO, "next buf deserialized", K(next_buf_len_));
-  }
+  //if (0 == buf_len_) {
+  //  if (OB_FAIL(deserialize_header())) {
+  //    STORAGE_LOG(WARN, "fail to deserialize header");
+  //  }
+  //  int64_t decompress_size = 0;
+  //  compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,3*2LL<<20, decompress_size);
+  //  char *next_buf_start = const_cast<char*>(buf_) + buf_len_;
+  //  memcpy(decompress_buf_, buf_, 8);
+  //  buf_ = decompress_buf_;
+  //  buf_len_ = decompress_size + 8;
+  //  next_buf_len_ = 0;
+  //  if(OB_FAIL(deserialize_next_header(next_buf_start, next_buf_len_))) {
+  //    STORAGE_LOG(WARN, "fail to deserialize next header");
+  //  }
+  //  STORAGE_LOG(INFO, "next buf deserialized", K(next_buf_len_));
+  //}
   if (OB_SUCC(ret)) {
     if (buf_pos_ == buf_len_) {
       ret = common::OB_EAGAIN;
@@ -592,6 +607,7 @@ private:
   bool is_prefetch_end_;
   int64_t buf_size_;
   bool is_first_prefetch_;
+  bool is_open_prefetch_;
   int64_t current_size_;
   int64_t first_buf_size_;
   common::ObArray<int64_t> parallel_start_offsets_;
@@ -616,7 +632,7 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
       macro_buffer_reader_(), fd_(-1), dir_id_(-1), curr_item_(),
       file_io_handles_(), handle_cursor_(-1), buf_(NULL),
       tenant_id_(common::OB_INVALID_ID), is_prefetch_end_(false), buf_size_(0),
-      is_first_prefetch_(true), current_size_ (0){}
+      is_first_prefetch_(true), is_open_prefetch_(true), current_size_ (0){}
 
 template <typename T>
 ObFragmentReaderV2<T>::~ObFragmentReaderV2()
@@ -660,6 +676,7 @@ int ObFragmentReaderV2<T>::init(
       dir_id_ = dir_id;
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
+      is_open_prefetch_ = true;
       //buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) / 3;
       buf_size_ = first_buf_size;
       is_inited_ = true;
@@ -700,10 +717,11 @@ int ObFragmentReaderV2<T>::prefetch()
       blocksstable::ObTmpFileIOInfo io_info;
       io_info.fd_ = fd_;
       io_info.dir_id_ = dir_id_;
-      if(unlikely(is_first_prefetch_)) {
+      if(unlikely(is_open_prefetch_)) {
         io_info.size_ = buf_size_ + 8;
+        is_open_prefetch_ = false;
       }else {
-        io_info.size_ = get_next_buf_size();
+        io_info.size_ = get_next_buf_size() + 8;
       }
       STORAGE_LOG(INFO,"prefetch size", K(io_info.size_));
       io_info.tenant_id_ = tenant_id_;
@@ -753,11 +771,11 @@ int ObFragmentReaderV2<T>::pipeline()
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObFragmentReaderV2 has not been inited", K(ret));
-  } else if (OB_FAIL(wait())) {
+  } else if (OB_FAIL(wait())) {//switch next buffer
     if (common::OB_ITER_END != ret) {
       STORAGE_LOG(WARN, "fail to wait io finish", K(ret));
     }
-  } else if (OB_FAIL(prefetch())) {
+  } else if (OB_FAIL(prefetch())) {//perfetch next next buffer,里面解析next buffer的header
     STORAGE_LOG(WARN, "fail to prefetch data", K(ret));
   }
   return ret;
@@ -820,6 +838,7 @@ void ObFragmentReaderV2<T>::reset()
   is_prefetch_end_ = false;
   buf_size_ = 0;
   is_first_prefetch_ = true;
+  is_open_prefetch_ = true;
   current_size_=0;
   parallel_start_offsets_.reset();
 }

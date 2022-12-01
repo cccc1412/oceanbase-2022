@@ -14,6 +14,7 @@
 #define OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
 
 #include "blocksstable/ob_block_manager.h"
+#include "easy_define.h"
 #include "lib/ob_errno.h"
 #include "lib/oblog/ob_log_module.h"
 #include "share/ob_define.h"
@@ -144,11 +145,15 @@ int ObMacroBufferWriter<T>::serialize_header()
   if (OB_FAIL(common::serialization::encode_i64(buf_, header_size, tmp_pos_, buf_pos_))) {
     STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos_),
         K(header_size), K(buf_pos_));
-  } else {
+  } else if(OB_FAIL(common::serialization::encode_i64(buf_, header_size, tmp_pos_, buf_pos_))) {
+    STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos_),
+        K(header_size), K(buf_pos_));
+  } else{
     STORAGE_LOG(DEBUG, "serialize header success", K(tmp_pos_), K(buf_pos_));
   }
   return ret;
 }
+
 
 template<typename T>
 int ObMacroBufferWriter<T>::assign(const int64_t pos, const int64_t buf_cap, char *buf)
@@ -188,6 +193,7 @@ private:
   int check_need_flush(bool &need_flush);
 private:
   bool is_inited_;
+  bool is_first_write_;
   char *buf_;
   char *compress_buf_;
   int64_t buf_size_;
@@ -213,7 +219,7 @@ public:
 
 template<typename T>
 ObFragmentWriterV2<T>::ObFragmentWriterV2()
-  : is_inited_(false), buf_(NULL),compress_buf_(NULL), buf_size_(0), expire_timestamp_(0),
+  : is_inited_(false), is_first_write_(true), buf_(NULL),compress_buf_(NULL), buf_size_(0), expire_timestamp_(0),
     allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
     macro_buffer_writer_(), has_sample_item_(false), sample_item_(),
     file_io_handle_(), fd_(-1), dir_id_(-1), tenant_id_(common::OB_INVALID_ID), current_size_(0), parallel_start_offsets_()
@@ -332,9 +338,9 @@ int ObFragmentWriterV2<T>::flush_buffer()
     STORAGE_LOG(WARN, "fail to get io timeout ms", K(ret), K(expire_timestamp_));
   } else if (OB_FAIL(file_io_handle_.wait(timeout_ms))) {
     STORAGE_LOG(WARN, "fail to wait io finish", K(ret));
-  } else if(OB_FAIL(compressor_.compress(buf_ + 8, macro_buffer_writer_.size() - 8, compress_buf_ + 8, buf_size_ + buf_size_ / 255 + 32, compress_size))){
+  } else if(OB_FAIL(compressor_.compress(buf_ + 8, macro_buffer_writer_.size() - 8, compress_buf_ + 16, buf_size_ + buf_size_ / 255 + 32, compress_size))){
     STORAGE_LOG(WARN, "fail to compress", K(compress_size), K(buf_size_));
-  } else if(OB_FAIL(macro_buffer_writer_.assign(compress_size + ObExternalSortConstant::BUF_HEADER_LENGTH, compress_size, compress_buf_))) {
+  } else if(OB_FAIL(macro_buffer_writer_.assign(compress_size + ObExternalSortConstant::BUF_HEADER_LENGTH * 2, compress_size, compress_buf_))) {
     STORAGE_LOG(WARN, "faile to assign macro buffer writer");
   } else if (OB_FAIL(macro_buffer_writer_.serialize_header())) {
     STORAGE_LOG(WARN, "fail to serialize header", K(ret));
@@ -343,7 +349,12 @@ int ObFragmentWriterV2<T>::flush_buffer()
     io_info.fd_ = fd_;
     io_info.dir_id_ = dir_id_;
     //io_info.size_ = buf_size_;
-    io_info.size_ = buf_size_ / 3;
+    if(unlikely(is_first_write_)) {
+      io_info.size_ = buf_size_ / 3;
+      is_first_write_ = false;
+    } else {
+      io_info.size_ = compress_size + 16;
+    }
     io_info.tenant_id_ = tenant_id_;
     //io_info.buf_ = buf_;
     io_info.buf_ = compress_buf_;
@@ -434,7 +445,9 @@ public:
   virtual ~ObMacroBufferReader();
   int read_item(T &item);
   int deserialize_header();
+  int deserialize_next_header(char *buf, int64_t &next_buf_len);
   void assign(const int64_t buf_pos, const int64_t buf_cap, const char *buf);
+  int64_t get_next_buf_size() { return next_buf_len_;}
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 private:
   common::ObLZ4Compressor191 compressor_;
@@ -443,6 +456,7 @@ private:
   int64_t buf_pos_;
   int64_t buf_len_;
   int64_t buf_cap_;
+  int64_t next_buf_len_;
 };
 
 template<typename T>
@@ -469,10 +483,16 @@ int ObMacroBufferReader<T>::read_item(T &item)
       STORAGE_LOG(WARN, "fail to deserialize header");
     }
     int64_t decompress_size = 0;
-    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,3*2LL<<20, decompress_size);
+    compressor_.decompress(buf_ + 2*buf_pos_, buf_len_ - 16, decompress_buf_ + 8,3*2LL<<20, decompress_size);
+    char *next_buf_start = const_cast<char*>(buf_) + buf_len_;
     memcpy(decompress_buf_, buf_, 8);
     buf_ = decompress_buf_;
     buf_len_ = decompress_size + 8;
+    next_buf_len_ = 0;
+    if(OB_FAIL(deserialize_next_header(next_buf_start, next_buf_len_))) {
+      STORAGE_LOG(WARN, "fail to deserialize next header");
+    }
+    STORAGE_LOG(INFO, "next buf deserialized", K(next_buf_len_));
   }
   if (OB_SUCC(ret)) {
     if (buf_pos_ == buf_len_) {
@@ -494,6 +514,21 @@ int ObMacroBufferReader<T>::deserialize_header()
   if (OB_FAIL(common::serialization::decode_i64(buf_, header_size, buf_pos_, &buf_len_))) {
     STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(buf_pos_),
         K(header_size), K(buf_len_));
+  } else {
+    STORAGE_LOG(DEBUG, "deserialize header success", K(buf_len_), K(buf_pos_));
+  }
+  return ret;
+}
+
+template<typename T>
+int ObMacroBufferReader<T>::deserialize_next_header(char *buf, int64_t &next_buf_len)
+{
+  int ret = common::OB_SUCCESS;
+  const int64_t header_size = ObExternalSortConstant::BUF_HEADER_LENGTH;
+  int64_t tmp_pos = 0;
+  if (OB_FAIL(common::serialization::decode_i64(buf, header_size, tmp_pos, &next_buf_len))) {
+    STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret),
+        K(header_size), K(next_buf_len));
   } else {
     STORAGE_LOG(DEBUG, "deserialize header success", K(buf_len_), K(buf_pos_));
   }
@@ -552,6 +587,10 @@ private:
 public:
   const common::ObArray<int64_t> &parallel_start_offsets() {
     return parallel_start_offsets_;
+  }
+
+  int64_t get_next_buf_size() {
+    return macro_buffer_reader_.get_next_buf_size();
   }
 };
 
@@ -647,7 +686,12 @@ int ObFragmentReaderV2<T>::prefetch()
       blocksstable::ObTmpFileIOInfo io_info;
       io_info.fd_ = fd_;
       io_info.dir_id_ = dir_id_;
-      io_info.size_ = buf_size_;
+      if(unlikely(is_first_prefetch_)) {
+        io_info.size_ = buf_size_ + 8;
+      }else {
+        io_info.size_ = get_next_buf_size();
+      }
+      STORAGE_LOG(INFO,"prefetch size", K(io_info.size_));
       io_info.tenant_id_ = tenant_id_;
       io_info.buf_ = buf_;
       io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);

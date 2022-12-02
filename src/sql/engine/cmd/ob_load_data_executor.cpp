@@ -33,6 +33,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   }
 
   ObLoadDispatcher dispatcher(PROCESS_THREAD_NUM, LOAD_THREAD_NUM);
+  dispatcher.debug_print();
   ObLoadSSTableWriter sstable_writer;
   if (OB_FAIL(do_execute(ctx, stmt, dispatcher, sstable_writer))) {
     LOG_WARN("do process fail", KR(ret));
@@ -93,7 +94,7 @@ int ObLoadDataExecutor::do_process(ObLoadDataDirectTaskQueue &async_tq,
       ObLoadDataDirectTask ObLDDT(i, ctx, stmt, offset,
                                   end, true, &dispatcher,
                                   &sstable_writer);
-      ObLDDT.set_retry_interval(1000LL * 1000LL * 10LL);
+      ObLDDT.set_retry_times(0);
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
         break;
@@ -117,6 +118,7 @@ int ObLoadDataExecutor::do_load(ObLoadDataDirectTaskQueue &async_tq,
     for (int i = 0; i < LOAD_THREAD_NUM; i++) {
       ObLoadDataDirectTask ObLDDT(i, ctx, stmt, 0, 0, false, &dispatcher,
                                   &sstable_writer);
+      ObLDDT.set_retry_times(0);
       if (OB_FAIL(async_tq.push_task(ObLDDT))) {
         LOG_WARN("cannot push task", KR(ret));
         break;

@@ -150,12 +150,13 @@ int ObMacroBufferWriter<T>::serialize_header(bool is_first_write)
   }
   int64_t tmp_pos2_ = 0;
   if(likely(!is_first_write)) {
-    if(OB_FAIL(common::serialization::encode_i64(buf_+8, header_size, tmp_pos2_, buf_pos_))) {
-      STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos2_),
-          K(header_size), K(buf_pos_));
-    } else{
-      STORAGE_LOG(DEBUG, "serialize header success", K(tmp_pos2_), K(buf_pos_));
-    }
+    memcpy(buf_ + 8, buf_, 8);
+    //if(OB_FAIL(common::serialization::encode_i64(buf_+8, header_size, tmp_pos2_, buf_pos_))) {
+    //  STORAGE_LOG(WARN, "fail to encode macro block buffer header", K(ret), K(tmp_pos2_),
+    //      K(header_size), K(buf_pos_));
+    //} else{
+    //  STORAGE_LOG(DEBUG, "serialize header success", K(tmp_pos2_), K(buf_pos_));
+    //}
   }
   return ret;
 }
@@ -469,6 +470,9 @@ public:
   int deserialize_next_header(char *buf, int64_t &next_buf_len);
   void assign(const int64_t buf_pos, const int64_t buf_cap, const char *buf);
   int64_t get_next_buf_size();
+  void set_next_buf_size(int64_t len) {
+    next_buf_len_ = len;
+  }
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 private:
   common::ObLZ4Compressor191 compressor_;
@@ -477,11 +481,14 @@ private:
   int64_t buf_pos_;
   int64_t buf_len_;
   int64_t buf_cap_;
+  int64_t next_buf_len_;
 };
 
 template<typename T>
 int64_t ObMacroBufferReader<T>::get_next_buf_size() {
-  int ret = deserialize_header();
+  //int ret = deserialize_header();
+  buf_len_ = next_buf_len_;
+  buf_pos_ = 8;
   if(buf_len_ < 0) {
     STORAGE_LOG(WARN, "deserialize header failed");
   }
@@ -491,10 +498,9 @@ int64_t ObMacroBufferReader<T>::get_next_buf_size() {
   memcpy(decompress_buf_, buf_, 8);
   buf_ = decompress_buf_;
   buf_len_ = decompress_size + 8;
-  int64_t next_buf_len = 0;
-  deserialize_next_header(next_buf_start, next_buf_len);
-  if(next_buf_len < 0 || next_buf_len > decompress_size) return -1;
-  return next_buf_len;
+  next_buf_len_ = 0;
+  deserialize_next_header(next_buf_start, next_buf_len_);
+  return next_buf_len_;
 }
 
 template<typename T>
@@ -691,6 +697,7 @@ int ObFragmentReaderV2<T>::init(
       is_open_prefetch_ = true;
       //buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) / 3;
       buf_size_ = first_buf_size;
+      macro_buffer_reader_.set_next_buf_size(first_buf_size);
       is_inited_ = true;
       first_buf_size_ = first_buf_size;
     }

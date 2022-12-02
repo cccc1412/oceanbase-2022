@@ -4,6 +4,7 @@
 #include "lib/container/ob_vector.h"
 #include "lib/file/ob_file.h"
 #include "lib/lock/ob_spin_lock.h"
+#include "lib/thread/thread.h"
 #include "lib/timezone/ob_timezone_info.h"
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/cmd/ob_load_data_parser.h"
@@ -12,17 +13,15 @@
 #include "storage/tx_storage/ob_ls_handle.h"
 
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
+#include <thread>
 
 namespace oceanbase {
 namespace sql {
 
-static const int64_t MAX_RECORD_SIZE = (1LL << 20);  // 1M
-static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*768L;
-// static const int64_t MEM_BUFFER_SIZE = 1LL*1024LL*1024LL*128LL;  // 128M
-static const int64_t FILE_BUFFER_SIZE = (2LL << 20); // 2M
-static const int64_t SAMPLING_NUM = (1LL << 20);
+static const int64_t MAX_RECORD_SIZE = (1LL << 12);         // 4K
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 768LL; // 768M
+static const int64_t FILE_BUFFER_SIZE = (2LL << 20);        // 2M
+static const int64_t SAMPLING_NUM = (1LL << 20);            // 1M
 
 class ObLoadDataBuffer {
 public:
@@ -166,14 +165,19 @@ private:
 };
 
 class ObLoadExternalSort {
+  typedef storage::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
 public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
   int init(const share::schema::ObTableSchema *table_schema, int64_t mem_size,
            int64_t file_buf_size);
   int append_row(const ObLoadDatumRow &datum_row);
+  int append_row_reuse(const ObLoadDatumRow &datum_row);
   int close();
   int get_next_row(const ObLoadDatumRow *&datum_row);
+  void set_dispatch_queue(ObLoadDispatchQueue *dispatch_queue) {
+    external_sort_.set_dispatch_queue(dispatch_queue);
+  }
 
 private:
   common::ObArenaAllocator allocator_;
@@ -226,6 +230,7 @@ class ObLoadDispatcher {
   typedef common::ObSpinLock Lock;
   typedef lib::ObLockGuard<Lock> LockGuard;
   typedef common::ObVector<ObLoadDatumRow *> LoadDatumRowVector;
+  typedef storage::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
 public:
   // thread_num 指的是向 ObLoadDispatcher 提供数据的线程数量
   // dispatch_num 指的是 ObLoadDispatcher 分发到外排桶的数量
@@ -234,8 +239,9 @@ public:
   int init(const ObTableSchema *table_schema);
   int append_row(const ObLoadDatumRow &datum_row);
   int get_next_row(int idx, const ObLoadDatumRow *&datum_row);
-  void free(const ObLoadDatumRow *&datum_row);
   int close(int idx);
+  ObLoadDispatchQueue *get_dispatch_queue(int idx);
+  void debug_print();
 
 private:
   int do_dispatch_all();
@@ -261,23 +267,21 @@ private:
   Lock smapling_data_lock_;
 
   int dispatch_num_;
-  Lock* dispatch_lock_[100];
   common::ObArray<ObLoadDatumRow *> dispatch_point_;
-  common::ObArray<LoadDatumRowVector> dispatch_data_;
+  common::ObArray<ObLoadDispatchQueue *> dispatch_queue_;
 };
-
 
 class ObLoadDataDirectDemo : public ObLoadDataBase {
 public:
   ObLoadDataDirectDemo();
   virtual ~ObLoadDataDirectDemo();
   int execute(ObExecContext &ctx, ObLoadDataStmt &load_stmt) override;
-  int init(int64_t index, ObLoadDataStmt & load_stmt, int64_t offset,
+  int init(int64_t index, ObLoadDataStmt &load_stmt, int64_t offset,
            int64_t end, bool stage_process, ObLoadDispatcher *dispatcher,
            ObLoadSSTableWriter *sstable_writer = nullptr);
 
 private:
-  int inner_init_process(ObLoadDataStmt &load_stmt); 
+  int inner_init_process(ObLoadDataStmt &load_stmt);
   int inner_init_load(ObLoadDataStmt &load_stmt);
   int do_process();
   int do_load();
@@ -291,7 +295,7 @@ private:
   ObLoadRowCaster row_caster_;
   ObLoadDispatcher *dispatcher_;
   ObLoadExternalSort external_sort_;
-  ObLoadSSTableWriter* sstable_writer_;
+  ObLoadSSTableWriter *sstable_writer_;
 };
 
 } // namespace sql

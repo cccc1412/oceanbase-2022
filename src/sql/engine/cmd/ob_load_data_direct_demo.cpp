@@ -607,7 +607,7 @@ int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
     LOG_INFO("ObLoadSSTableWriter init twice", KR(ret), KP(this));
   } else if (dispatch_num_ < 3 || dispatch_num_ > 100) {
     ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("invalid args", KR(ret));
+    LOG_WARN("invalid args", KR(ret), K(dispatch_num_));
   } else {
     allocator_.set_tenant_id(MTL_ID());
     const int64_t rowkey_column_num = table_schema->get_rowkey_column_num();

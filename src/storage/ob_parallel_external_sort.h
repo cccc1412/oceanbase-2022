@@ -426,6 +426,9 @@ public:
   void set_next_buf_size(int64_t len) {
     next_buf_len_ = len;
   }
+  void init_decompress_buffer(char *buf) {
+    decompress_buf_ = buf;
+  }
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 
 private:
@@ -447,7 +450,7 @@ int64_t ObMacroBufferReader<T>::get_next_buf_size() {
     STORAGE_LOG(WARN, "deserialize header failed");
   }
   int64_t decompress_size = 0;
-  compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,15*2LL<<20, decompress_size);
+  compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, 2LL<<20, decompress_size);
   char *next_buf_start = const_cast<char*>(buf_) + buf_len_;
   memcpy(decompress_buf_, buf_, 8);
   buf_ = decompress_buf_;
@@ -461,13 +464,13 @@ template<typename T>
 ObMacroBufferReader<T>::ObMacroBufferReader()
   : buf_(NULL), decompress_buf_(NULL) ,buf_pos_(0), buf_len_(0), buf_cap_(0)
 {
-  decompress_buf_ = new char[15*2LL<<20];
+  //decompress_buf_ = new char[2LL<<20];
 }
 
 template <typename T> ObMacroBufferReader<T>::~ObMacroBufferReader() {
-  if (decompress_buf_ != nullptr) {
-    delete decompress_buf_;
-  }
+  //if (decompress_buf_ != nullptr) {
+  //  delete decompress_buf_;
+  //}
 }
 
 template <typename T> int ObMacroBufferReader<T>::read_item(T &item) {
@@ -639,6 +642,7 @@ int ObFragmentReaderV2<T>::init(
       macro_buffer_reader_.set_next_buf_size(first_buf_size);
       is_inited_ = true;
       first_buf_size_ = first_buf_size;
+      macro_buffer_reader_.init_decompress_buffer((char*)allocator_.alloc(2<<20L));
     }
   }
   return ret;

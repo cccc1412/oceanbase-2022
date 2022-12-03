@@ -648,7 +648,7 @@ int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
                        buf = allocator_.alloc(sizeof(ObLoadDispatchQueue)))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(dispatch_queue = new (buf)
-                                 ObLoadDispatchQueue(MEM_BUFFER_SIZE))) {
+                                 ObLoadDispatchQueue(MEM_BUFFER_SIZE,SLEEP_TIME))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(buf =
                                  allocator_.alloc(sizeof(ObArenaAllocator)))) {
@@ -695,25 +695,56 @@ int ObLoadDispatcher::do_dispatch_one(const ObLoadDatumRow *item) {
   size_t dispatch_size = dispatch_point_.size();
   int idx = 0;
 
-  // 查询桶
-  // item < dispatch_point_[0]
-  if (compare_(item, dispatch_point_[0])) {
-    idx = 0;
-  }
-  // item >= dispatch_point_[dispatch_size - 1]
-  else if (!compare_(item, dispatch_point_[dispatch_size - 1])) {
-    idx = dispatch_size;
-  }
-  // item >= dispatch_point_[j - 1] and item < dispatch_point_[j]
-  else {
-    for (size_t j = 1; j < dispatch_size; j++) {
-      if (!compare_(item, dispatch_point_[j - 1]) &&
-          compare_(item, dispatch_point_[j])) {
-        idx = j;
+  // 二分查询桶
+  size_t left = 0, right = dispatch_size;
+  while (left <= right) {
+    size_t mid = (left + right) / 2;
+    if (mid > 0 && mid < dispatch_size) {
+      if (!compare_(item, dispatch_point_[mid - 1]) &&
+          compare_(item, dispatch_point_[mid])) {
+        idx = mid;
         break;
+      } else if (compare_(item, dispatch_point_[mid - 1])) {
+        right = mid - 1;
+      } else {
+        left = mid + 1;
+      }
+    } else if (mid == 0) {
+      if (compare_(item, dispatch_point_[0])) {
+        idx = 0;
+        break;
+      } else {
+        left = 1;
+      }
+    } else {
+      if (!compare_(item, dispatch_point_[dispatch_size - 1])) {
+        idx = dispatch_size;
+        break;
+      } else {
+        right = dispatch_size - 1;
       }
     }
   }
+
+  // 查询桶
+  // item < dispatch_point_[0]
+  // if (compare_(item, dispatch_point_[0])) {
+  //   idx = 0;
+  // }
+  // // item >= dispatch_point_[dispatch_size - 1]
+  // else if (!compare_(item, dispatch_point_[dispatch_size - 1])) {
+  //   idx = dispatch_size;
+  // }
+  // // item >= dispatch_point_[j - 1] and item < dispatch_point_[j]
+  // else {
+  //   for (size_t j = 1; j < dispatch_size; j++) {
+  //     if (!compare_(item, dispatch_point_[j - 1]) &&
+  //         compare_(item, dispatch_point_[j])) {
+  //       idx = j;
+  //       break;
+  //     }
+  //   }
+  // }
 
   if (OB_FAIL(dispatch_queue_[idx]->push_item(item))) {
     LOG_WARN("fail to push back to dispatch queue", K(ret));
@@ -770,7 +801,9 @@ int ObLoadDispatcher::append_row(const ObLoadDatumRow &datum_row) {
   }
 
   bool just_finished_ = false;
-  {
+  if (finish_smapling_) {
+    current_num_++;
+  } else {
     LockGuard guard(lock_);
     current_num_++;
     if (!finish_smapling_ && current_num_ == SAMPLING_NUM) {
@@ -779,13 +812,13 @@ int ObLoadDispatcher::append_row(const ObLoadDatumRow &datum_row) {
     }
   }
 
-  while (current_num_ > SAMPLING_NUM)
-    sleep(1);
+  while (current_num_ > BUFFER_NUM)
+    usleep(SLEEP_TIME);
 
   // 采样完成后，数据直接分发对应的桶内
   if (finish_smapling_ && !just_finished_) {
     while (!finish_smapling_stat_)
-      sleep(1);
+      usleep(SLEEP_TIME);
     if (OB_FAIL(do_dispatch_one(&datum_row))) {
       LOG_WARN("fail to do dispatch one", KR(ret));
     }
@@ -837,7 +870,7 @@ int ObLoadDispatcher::get_next_row(int idx, const ObLoadDatumRow *&datum_row) {
     LOG_WARN("invalid args", KR(ret));
   } else {
     while (!finish_smapling_stat_)
-      sleep(1);
+      usleep(SLEEP_TIME);
     if (OB_FAIL(dispatch_queue_[idx]->pop_item(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
@@ -900,11 +933,13 @@ void ObLoadDispatcher::debug_print() {
   int ret = OB_SUCCESS;
   auto print_func = [&]() {
     while (!this->is_finished_) {
-      sleep(3);
+      usleep(SLEEP_TIME);
       LOG_INFO("[OB_LOAD_INFO]", "current_num", this->current_num_.load());
       for (int i = 0; i < this->dispatch_num_; i++) {
-        LOG_INFO("[OB_LOAD_INFO]", "dispatch", i, "pop_size",
-                 this->dispatch_queue_[i]->get_pop_size(),"push_size", this->dispatch_queue_[i]->get_push_size());
+        int64_t pop_size=this->dispatch_queue_[i]->get_pop_size()/(1LL<<20);
+        int64_t push_size = this->dispatch_queue_[i]->get_push_size()/(1LL << 20);
+        int64_t remain_size = push_size - pop_size;
+        LOG_INFO("[OB_LOAD_INFO]", "dispatch", i, "pop_size",pop_size, "push_size",push_size, "remain_size",remain_size);
       }
     }
   };
@@ -1487,9 +1522,13 @@ int ObLoadDataDirectDemo::do_process() {
 
 int ObLoadDataDirectDemo::do_load() {
   int ret = OB_SUCCESS;
-  int count_ = 0;
   const ObLoadDatumRow *datum_row = nullptr;
 
+  int count_ = 0;
+  clock_t start, end;
+  int64_t t;
+
+  start = clock();
   while (OB_SUCC(ret)) {
     if (OB_FAIL(dispatcher_->get_next_row(index_, datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
@@ -1511,6 +1550,10 @@ int ObLoadDataDirectDemo::do_load() {
     }
   }
 
+  end=clock();
+  t=(end-start)/CLOCKS_PER_SEC;
+  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "external sort time",t);
+
   while (OB_SUCC(ret)) {
     if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
@@ -1529,6 +1572,10 @@ int ObLoadDataDirectDemo::do_load() {
       LOG_WARN("fail to close sstable writer", KR(ret));
     }
   }
+
+  end = clock();
+  t = (end - start) / CLOCKS_PER_SEC;
+  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "sstable time",t);
 
   LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "load data num", count_);
 

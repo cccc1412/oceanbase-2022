@@ -42,8 +42,6 @@ struct ObExternalSortConstant {
       8 * 1024LL * 1024LL; // min memory limit is 8m
   static const int64_t DEFAULT_FILE_READ_WRITE_BUFFER = 2 * 1024 * 1024LL; // 2m
   static const int64_t MIN_MULTIPLE_MERGE_COUNT = 2;
-
-  static const int64_t PARALLEL_SPILT_SIZE = 1L * 1024LL * 1024LL * 128LL;
   static inline int get_io_timeout_ms(const int64_t expire_timestamp,
                                       int64_t &wait_time_ms);
   static inline bool is_timeout(const int64_t expire_timestamp);
@@ -209,11 +207,6 @@ private:
   common::ObArray<int64_t> parallel_start_offsets_;
   common::ObLZ4Compressor191 compressor_;
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
-
-public:
-  const common::ObArray<int64_t> &parallel_start_offsets() {
-    return parallel_start_offsets_;
-  }
 };
 
 template <typename T>
@@ -242,8 +235,6 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
     ret = common::OB_INVALID_ARGUMENT;
     STORAGE_LOG(WARN, "invalid argument", K(ret), K(buf_size),
                 K(expire_timestamp));
-  } else if (OB_FAIL(parallel_start_offsets_.reserve(128))) {
-    STORAGE_LOG(WARN, "fail to reserve space", K(ret));
   } else {
     dir_id_ = dir_id;
     const int64_t align_buf_size = common::lower_align(
@@ -358,28 +349,7 @@ template <typename T> int ObFragmentWriterV2<T>::flush_buffer() {
     if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
       STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
     } else {
-      int64_t size = macro_buffer_writer_.size();
-      if (size + current_size_ > ObExternalSortConstant::PARALLEL_SPILT_SIZE) {
-        if (parallel_start_offsets_.size() == 0 &&
-            OB_FAIL(parallel_start_offsets_.push_back(0))) {
-          STORAGE_LOG(WARN, "failed to push back offset", K(ret));
-        } else {
-          int64_t pre_offset =
-              parallel_start_offsets_.at(parallel_start_offsets_.size() - 1);
-          if (OB_FAIL(parallel_start_offsets_.push_back(pre_offset +
-                                                        current_size_))) {
-            STORAGE_LOG(WARN, "failed to push back offset", K(ret));
-          } else {
-            current_size_ = size;
-            macro_buffer_writer_.assign(
-                ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, buf_);
-          }
-        }
-      } else {
-        current_size_ += size;
-        macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH,
-                                    buf_size_, buf_);
-      }
+      macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, buf_);
     }
   }
   return ret;
@@ -443,7 +413,6 @@ template <typename T> void ObFragmentWriterV2<T>::reset() {
   dir_id_ = -1;
   tenant_id_ = common::OB_INVALID_ID;
   current_size_ = 0;
-  parallel_start_offsets_.reuse();
 }
 
 template <typename T> class ObMacroBufferReader {
@@ -662,9 +631,6 @@ int ObFragmentReaderV2<T>::init(
       STORAGE_LOG(WARN, "failed to alloc buf", K(ret), K(buf_len));
     } else if (OB_FAIL(curr_item_.deep_copy(sample_item, buf, buf_len, pos))) {
       STORAGE_LOG(WARN, "failed to deep copy item", K(ret));
-    } else if (OB_FAIL(
-                   parallel_start_offsets_.assign(parallel_start_offsets))) {
-      STORAGE_LOG(WARN, "fail to assign parallel_start_offsets", K(ret));
     } else {
       expire_timestamp_ = expire_timestamp;
       handle_cursor_ = 0;
@@ -1511,11 +1477,11 @@ template <typename T> class DispatchQueue {
   typedef common::ObVector<T *> DatumRowVector;
 
 public:
-  DispatchQueue(int mem_limit)
+  DispatchQueue(int64_t mem_limit,uint64_t sleep)
       : is_finished(false), push_used(0), push_size(0), pop_size(0),
         pop_index(0), push_alloc_id(0), pop_alloc_id(0),
-        buf_mem_limit(mem_limit){};
-  ~DispatchQueue() = default;
+        buf_mem_limit(mem_limit),sleep_time(sleep){};
+  ~DispatchQueue(){ reset();};
 
   void init(common::ObArenaAllocator *allocator0,
             common::ObArenaAllocator *allocator1) {
@@ -1531,7 +1497,7 @@ public:
     int ret = OB_SUCCESS;
     char *buf = NULL;
     T *new_item = NULL;
-    // 额外多分配了一个单位的内存，最后一个内存记录是否已经初始化
+    // 额外多分配了一个单位的内存，第一个内存记录是否已经初始化
     int64_t buf_pos = sizeof(T);
     const int64_t item_size = buf_pos + item->get_deep_copy_size();
     const int64_t alloc_size = 1 + item_size;
@@ -1552,11 +1518,11 @@ public:
 
   int pop_item(const T *&item) {
     while (!is_finished && pop_size == push_size)
-      sleep(1);
+      usleep(sleep_time);
     if (pop_size < push_size) {
       char *buf = (char *)dispatch_data_[pop_alloc_id].at(pop_index);
       while (buf[0]==0)
-        sleep(1);
+        usleep(sleep_time);
       item = (T *)(buf+1);
       const int64_t alloc_size = 1 + sizeof(T) + item->get_deep_copy_size();
       pop_index++;
@@ -1590,10 +1556,6 @@ public:
     dispatch_data_[1].reset();
   }
 
-  TO_STRING_KV(K(is_finished), K(push_used), K(push_size), K(pop_size),
-               K(pop_index), K(push_alloc_id), K(pop_alloc_id), KP(push_alloc),
-               KP(pop_alloc), K(buf_mem_limit));
-
   int64_t get_push_size() {
     if (push_alloc != pop_alloc)
       return push_size + push_used;
@@ -1602,6 +1564,10 @@ public:
   }
 
   int64_t get_pop_size() { return pop_size; }
+
+  TO_STRING_KV(K(is_finished), K(push_used), K(push_size), K(pop_size),
+               K(pop_index), K(push_alloc_id), K(pop_alloc_id), KP(push_alloc),
+               KP(pop_alloc), K(buf_mem_limit));
 
 private:
   // 线程安全
@@ -1650,7 +1616,7 @@ private:
     common::ObArenaAllocator *new_push_alloc =
         allocator_[(push_alloc_id + 1) % 2];
     while (new_push_alloc == pop_alloc)
-      sleep(1);
+      usleep(sleep_time);
   }
 
   bool is_finished;
@@ -1666,6 +1632,7 @@ private:
   common::ObArenaAllocator *pop_alloc;
   Lock lock;
   int64_t buf_mem_limit;
+  uint64_t sleep_time;
 };
 
 template <typename T>

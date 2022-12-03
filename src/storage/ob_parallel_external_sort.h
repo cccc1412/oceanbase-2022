@@ -450,7 +450,7 @@ int64_t ObMacroBufferReader<T>::get_next_buf_size() {
     STORAGE_LOG(WARN, "deserialize header failed");
   }
   int64_t decompress_size = 0;
-  compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, 2LL<<20, decompress_size);
+  compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8, 2*2LL<<20, decompress_size);
   char *next_buf_start = const_cast<char*>(buf_) + buf_len_;
   memcpy(decompress_buf_, buf_, 8);
   buf_ = decompress_buf_;
@@ -642,7 +642,7 @@ int ObFragmentReaderV2<T>::init(
       macro_buffer_reader_.set_next_buf_size(first_buf_size);
       is_inited_ = true;
       first_buf_size_ = first_buf_size;
-      macro_buffer_reader_.init_decompress_buffer((char*)allocator_.alloc(2<<20L));
+      macro_buffer_reader_.init_decompress_buffer((char*)allocator_.alloc(2*2<<20L));
     }
   }
   return ret;

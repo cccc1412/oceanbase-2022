@@ -1,7 +1,7 @@
 rm perf.data
 rm out.*
 passwd="201768"
-echo $passwd| sudo -S perf record -F 199 -p $(pidof observer) -g sleep 480
+echo $passwd| sudo -S perf record -F 199 -p $(pidof observer) -g sleep 190
 # -F 采样频率
 # -g 生成函数调用 call gragh
 # -p 指定进程

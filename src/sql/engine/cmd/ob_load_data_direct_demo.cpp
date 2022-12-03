@@ -812,7 +812,7 @@ int ObLoadDispatcher::append_row(const ObLoadDatumRow &datum_row) {
     }
   }
 
-  while (current_num_ > SAMPLING_NUM)
+  while (current_num_ > BUFFER_NUM)
     usleep(SLEEP_TIME);
 
   // 采样完成后，数据直接分发对应的桶内

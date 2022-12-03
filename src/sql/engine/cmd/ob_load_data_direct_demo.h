@@ -243,6 +243,7 @@ public:
   int append_row(const ObLoadDatumRow &datum_row);
   int get_next_row(int idx, const ObLoadDatumRow *&datum_row);
   int close(int idx);
+  void error_close(int idx);
   ObLoadDispatchQueue *get_dispatch_queue(int idx);
   void debug_print();
 

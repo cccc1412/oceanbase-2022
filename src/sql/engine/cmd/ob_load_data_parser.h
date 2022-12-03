@@ -97,6 +97,9 @@ public:
                  common::ObIArray<LineErrRec> &errors,
                  bool is_end_file);
 
+  template<common::ObCharsetType cs_type>
+  int scan_proto_easy(const char *&str, const char *end);
+
   template<typename handle_func, bool DO_ESCAPE = false>
   int scan(const char *&str, const char *end, int64_t &nrows,
            char *escape_buf, char *escaped_buf_end,
@@ -124,6 +127,26 @@ public:
     }
     return ret;
   }
+
+  int scan_easy(const char *&str, const char *end) {
+    int ret = common::OB_SUCCESS;
+    switch (format_.cs_type_) {
+    case common::CHARSET_UTF8MB4:
+      ret = scan_proto_easy<common::CHARSET_UTF8MB4>(str, end);
+      break;
+    case common::CHARSET_GBK:
+      ret = scan_proto_easy<common::CHARSET_GBK>(str, end);
+      break;
+    case common::CHARSET_GB18030:
+      ret = scan_proto_easy<common::CHARSET_GB18030>(str, end);
+      break;
+    default:
+      ret = scan_proto_easy<common::CHARSET_BINARY>(str, end);
+      break;
+    }
+    return ret;
+  }
+
   common::ObIArray<FieldValue>& get_fields_per_line() { return fields_per_line_; }
 
 private:
@@ -389,6 +412,35 @@ int ObCSVGeneralParser::scan_proto(const char *&str,
   str = line_begin;
   nrows = line_no;
 
+  return ret;
+}
+
+template <common::ObCharsetType cs_type>
+int ObCSVGeneralParser::scan_proto_easy(const char *&str, const char *end) {
+  int ret=OB_SUCCESS;
+  const char *begin=str;
+  const char *last_field_begin=begin;
+  int field_idx=0;
+  bool find=false;
+  while (!find && begin < end) {
+    if (*begin == opt_param_.field_term_c_) {
+      gen_new_field(false, false, last_field_begin, begin, ++field_idx);
+      begin++;
+      last_field_begin=begin;
+    } else if (*begin == opt_param_.line_term_c_) {
+      begin++;
+      find=true;
+    } else {
+      int mb_len = mbcharlen<cs_type>(begin, end);
+      begin += mb_len;
+    }
+  }
+
+  if (!find) {
+    ret = OB_ITER_END;
+  } else {
+    str=begin;
+  }
   return ret;
 }
 

@@ -217,16 +217,7 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
   } else {
     const char *str = buffer.begin();
     const char *end = buffer.end();
-    int64_t nrows = 1;
-    if (OB_FAIL(csv_parser_.scan(str, end, nrows, nullptr, nullptr,
-                                 unused_row_handler_, err_records_, false))) {
-      LOG_WARN("fail to scan buffer", KR(ret));
-    } else if (OB_UNLIKELY(!err_records_.empty())) {
-      ret = err_records_.at(0).err_code;
-      LOG_WARN("fail to parse line", KR(ret));
-    } else if (0 == nrows) {
-      ret = OB_ITER_END;
-    } else {
+    if (OB_SUCC(csv_parser_.scan_easy(str, end))) {
       buffer.consume(str - buffer.begin());
       const ObIArray<ObCSVGeneralParser::FieldValue> &field_values_in_file =
           csv_parser_.get_fields_per_line();
@@ -243,6 +234,33 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
       }
       row = &row_;
     }
+
+    // int64_t nrows = 1;
+    // if (OB_FAIL(csv_parser_.scan(str, end, nrows, nullptr, nullptr,
+    //                              unused_row_handler_, err_records_, false))) {
+    //   LOG_WARN("fail to scan buffer", KR(ret));
+    // } else if (OB_UNLIKELY(!err_records_.empty())) {
+    //   ret = err_records_.at(0).err_code;
+    //   LOG_WARN("fail to parse line", KR(ret));
+    // } else if (0 == nrows) {
+    //   ret = OB_ITER_END;
+    // } else {
+    //   buffer.consume(str - buffer.begin());
+    //   const ObIArray<ObCSVGeneralParser::FieldValue> &field_values_in_file =
+    //       csv_parser_.get_fields_per_line();
+    //   for (int64_t i = 0; i < row_.count_; ++i) {
+    //     const ObCSVGeneralParser::FieldValue &str_v =
+    //         field_values_in_file.at(i);
+    //     ObObj &obj = row_.cells_[i];
+    //     if (str_v.is_null_) {
+    //       obj.set_null();
+    //     } else {
+    //       obj.set_string(ObVarcharType, ObString(str_v.len_, str_v.ptr_));
+    //       obj.set_collation_type(collation_type_);
+    //     }
+    //   }
+    //   row = &row_;
+    // }
   }
   return ret;
 }
@@ -920,6 +938,24 @@ int ObLoadDispatcher::close(int idx) {
   return ret;
 }
 
+void ObLoadDispatcher::error_close(int idx) {
+  LockGuard guard(lock_);
+  is_closed_[idx] = true;
+  bool is_finish = true;
+  for (size_t i = 0; i < is_closed_.size(); i++) {
+    if (!is_closed_[i]) {
+      is_finish = false;
+      break;
+    }
+  }
+  if (is_finish) {
+    is_finished_ = true;
+    for (int i = 0; i < dispatch_num_; i++) {
+      dispatch_queue_[i]->finish();
+    }
+  }
+}
+
 DispatchQueue<ObLoadDatumRow> *ObLoadDispatcher::get_dispatch_queue(int idx) {
   if (OB_UNLIKELY(idx >= dispatch_num_ || idx < 0)) {
     LOG_WARN("invalid args");
@@ -1516,6 +1552,8 @@ int ObLoadDataDirectDemo::do_process() {
     if (OB_FAIL(dispatcher_->close(index_))) {
       LOG_WARN("fail to close dispatcher", KR(ret));
     }
+  } else {
+    dispatcher_->error_close(index_);
   }
   return ret;
 }

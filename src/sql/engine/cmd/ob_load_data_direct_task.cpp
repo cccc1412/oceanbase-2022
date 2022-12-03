@@ -26,13 +26,6 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
 
 int ObLoadDataDirectTask::process() {
   int ret = OB_SUCCESS;
-  //cpu_set_t mask;  //CPU核的集合
-  //cpu_set_t get;   //获取在集合中的CPU
-  //CPU_ZERO(&mask);    //置空
-  //CPU_SET(index_ % get_nprocs(),&mask);   //设置亲和力值
-  //if(sched_setaffinity(0, sizeof(mask), &mask)) {
-  //  LOG_WARN("warning ! set affinity failed!");      
-  //}
 
   ObLoadDataDirectDemo *load_direct=nullptr;
   if (OB_ISNULL(load_direct = OB_NEWx(ObLoadDataDirectDemo, (&ctx_.get_allocator())))) {

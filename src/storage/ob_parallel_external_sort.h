@@ -204,7 +204,6 @@ private:
   uint64_t tenant_id_;
   int64_t current_size_;
   int64_t first_buf_size_;
-  common::ObArray<int64_t> parallel_start_offsets_;
   common::ObLZ4Compressor191 compressor_;
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
 };
@@ -214,7 +213,7 @@ ObFragmentWriterV2<T>::ObFragmentWriterV2()
   : is_inited_(false), is_first_write_(true), buf_(NULL),compress_buf_(NULL), buf_size_(0), expire_timestamp_(0),
     allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER, common::OB_MALLOC_BIG_BLOCK_SIZE),
     macro_buffer_writer_(), has_sample_item_(false), sample_item_(),
-    file_io_handle_(), fd_(-1), dir_id_(-1), tenant_id_(common::OB_INVALID_ID), current_size_(0), parallel_start_offsets_()
+    file_io_handle_(), fd_(-1), dir_id_(-1), tenant_id_(common::OB_INVALID_ID), current_size_(0)
 {
 }
 
@@ -546,7 +545,7 @@ public:
   int init(const int64_t fd, const int64_t dir_id,
            const int64_t expire_timestamp, const uint64_t tenant_id,
            const T &sample_item, const int64_t buf_size,
-           const common::ObArray<int64_t> &parallel_start_offsets, int64_t first_buf_size);
+           int64_t first_buf_size);
   // int64_t start_=0;
   // int64_t end_=-1;
   int open();
@@ -579,12 +578,8 @@ private:
   bool is_open_prefetch_;
   int64_t current_size_;
   int64_t first_buf_size_;
-  common::ObArray<int64_t> parallel_start_offsets_;
 
 public:
-  const common::ObArray<int64_t> &parallel_start_offsets() {
-    return parallel_start_offsets_;
-  }
 
   int64_t get_next_buf_size() {
     return macro_buffer_reader_.get_next_buf_size();
@@ -609,7 +604,7 @@ template <typename T>
 int ObFragmentReaderV2<T>::init(
     const int64_t fd, const int64_t dir_id, const int64_t expire_timestamp,
     const uint64_t tenant_id, const T &sample_item, const int64_t buf_size,
-    const common::ObArray<int64_t> &parallel_start_offsets, int64_t first_buf_size) {
+    int64_t first_buf_size) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(is_inited_)) {
     ret = common::OB_INIT_TWICE;
@@ -796,7 +791,6 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
   is_first_prefetch_ = true;
   is_open_prefetch_ = true;
   current_size_=0;
-  parallel_start_offsets_.reset();
 }
 
 template <typename T> int ObFragmentReaderV2<T>::clean_up() {
@@ -1224,7 +1218,7 @@ int ObExternalSortRound<T, Compare>::build_fragment() {
   } else {
     STORAGE_LOG(INFO, "build fragment", K(writer_.get_fd()), K(writer_.get_sample_item()));
     if (OB_FAIL(reader->init(writer_.get_fd(), writer_.get_dir_id(), expire_timestamp_, tenant_id_,
-        writer_.get_sample_item(), file_buf_size_,writer_.parallel_start_offsets(), writer_.get_first_buf_size()))) {
+        writer_.get_sample_item(), file_buf_size_, writer_.get_first_buf_size()))) {
       STORAGE_LOG(WARN, "fail to open reader", K(ret), K(file_buf_size_),
                   K(expire_timestamp_));
     } else if (OB_FAIL(iters_.push_back(reader))) {

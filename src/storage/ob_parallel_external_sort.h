@@ -1464,7 +1464,7 @@ public:
                K(pop_index), K(push_alloc_id), K(pop_alloc_id), KP(push_alloc),
                KP(pop_alloc), K(buf_mem_limit));
 
-private:
+protected:
   // 线程安全
   // 多个解析线程添加并使用 push_allocator 分配
   // 同时会将分配成功的 buf 放入对应的 dispatch_data_[push_alloc_id]
@@ -1514,6 +1514,7 @@ private:
       usleep(sleep_time);
   }
 
+protected:
   bool is_finished;
   int64_t push_used;
   int64_t push_size;

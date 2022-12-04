@@ -22,10 +22,12 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t PROCESS_THREAD_NUM = 5;
-  static const int64_t LOAD_THREAD_NUM = 11;
+  static const int64_t PROCESS_THREAD_NUM = 6;
+  static const int64_t LOAD_THREAD_NUM = 12;
+  static const int64_t SORT_QUEUE_BUFFER_SIZE = (1LL<<20)*256LL;
+  static const int64_t SORT_QUEUE_SLEEP_TIME = 400000;
 public:
-  ObLoadDataExecutor() {}
+  ObLoadDataExecutor() : allocator_(ObModIds::OB_SQL_LOAD_DATA) { allocator_.set_tenant_id(MTL_ID()); }
   virtual ~ObLoadDataExecutor() {}
 
   int execute(ObExecContext &ctx, ObLoadDataStmt &stmt);
@@ -35,14 +37,18 @@ private:
   // function members
 private:
   int do_execute(ObExecContext &ctx, ObLoadDataStmt &stmt,
-                 ObLoadDispatcher &dispatcher,
+                 ObLoadDispatcher &dispatcher, DispatchSortQueue *sort_queues,
                  ObLoadSSTableWriter &sstable_writer);
   int do_process(ObLoadDataDirectTaskQueue &async_tq, ObExecContext &ctx,
-                 ObLoadDataStmt &stmt, ObLoadDispatcher &dispatcher,
-                 ObLoadSSTableWriter &sstable_writer);
-  int do_load(ObLoadDataDirectTaskQueue &async_tq, ObExecContext &ctx,
-              ObLoadDataStmt &stmt, ObLoadDispatcher &dispatcher,
-              ObLoadSSTableWriter &sstable_writer);
+                 ObLoadDataStmt &stmt, ObLoadDispatcher &dispatcher);
+
+  int do_load1(ObLoadDataDirectTaskQueue &async_tq, ObExecContext &ctx,
+               ObLoadDataStmt &stmt, ObLoadDispatcher &dispatcher,
+               DispatchSortQueue *sort_queues);
+
+  int do_load2(ObLoadDataDirectTaskQueue &async_tq, ObExecContext &ctx,
+               ObLoadDataStmt &stmt, DispatchSortQueue *sort_queues, ObLoadSSTableWriter &sstable_writer);
+  common::ObArenaAllocator allocator_;
 };
 
 } // end namespace sql

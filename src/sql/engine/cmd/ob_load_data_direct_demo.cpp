@@ -969,7 +969,6 @@ DispatchQueue<ObLoadDatumRow> *ObLoadDispatcher::get_dispatch_queue(int idx) {
 }
 
 void ObLoadDispatcher::debug_print() {
-  int ret = OB_SUCCESS;
   auto print_func = [&]() {
     while (!this->is_finished_) {
       usleep(SLEEP_TIME);
@@ -1374,42 +1373,52 @@ int ObLoadSSTableWriter::finish() {
  * ObLoadDataDirectDemo
  */
 
-ObLoadDataDirectDemo::ObLoadDataDirectDemo() {}
+ObLoadDataDirectDemo::ObLoadDataDirectDemo(){}
 
 ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (stage_process_) {
+  if (stage_process_==0) {
     if (OB_FAIL(do_process())) {
-      LOG_WARN("fail to do load", KR(ret));
+      LOG_WARN("fail to do process", KR(ret));
+    }
+  } else if (stage_process_ == 1) {
+    if (OB_FAIL(do_load1())) {
+      LOG_WARN("fail to do load1", KR(ret));
     }
   } else {
-    if (OB_FAIL(do_load())) {
-      LOG_WARN("fail to do process", KR(ret));
+    if (OB_FAIL(do_load2())) {
+      LOG_WARN("fail to do load2", KR(ret));
     }
   }
   return ret;
 }
 
 int ObLoadDataDirectDemo::init(int64_t index, ObLoadDataStmt &load_stmt,
-                               int64_t offset, int64_t end, bool stage_process,
+                               int64_t offset, int64_t end, int stage_process,
                                ObLoadDispatcher *dispatcher,
+                               DispatchSortQueue *sort_queue,
                                ObLoadSSTableWriter *sstable_writer) {
   int ret = OB_SUCCESS;
   index_ = index;
   stage_process_ = stage_process;
   dispatcher_ = dispatcher;
+  sort_queue_ = sort_queue;
   sstable_writer_ = sstable_writer;
-  if (stage_process_) {
+  if (stage_process_==0) {
     if (OB_FAIL(inner_init_process(load_stmt))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo process", KR(ret));
     } else if (OB_FAIL(file_reader_.set_offset_end(offset, end))) {
       LOG_WARN("fail to set offset and end", KR(ret));
     }
-  } else {
-    if (OB_FAIL(inner_init_load(load_stmt))) {
+  } else if (stage_process_ == 1) {
+    if (OB_FAIL(inner_init_load1(load_stmt))) {
+      LOG_WARN("fail to init ObLoadDataDirectDemo load", KR(ret));
+    }
+  } else{
+    if (OB_FAIL(inner_init_load2(load_stmt))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo load", KR(ret));
     }
   }
@@ -1464,7 +1473,7 @@ int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt) {
   return ret;
 }
 
-int ObLoadDataDirectDemo::inner_init_load(ObLoadDataStmt &load_stmt) {
+int ObLoadDataDirectDemo::inner_init_load1(ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
   const ObLoadArgument &load_args = load_stmt.get_load_arguments();
   const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
@@ -1497,17 +1506,45 @@ int ObLoadDataDirectDemo::inner_init_load(ObLoadDataStmt &load_stmt) {
                                        FILE_BUFFER_SIZE))) {
     LOG_WARN("fail to init external sort", KR(ret));
   }
+  // init sort_queue_ 
+  else {
+    external_sort_.set_dispatch_queue(dispatcher_->get_dispatch_queue(index_));
+  }
+  
+  return ret;
+}
+
+int ObLoadDataDirectDemo::inner_init_load2(ObLoadDataStmt &load_stmt) {
+  int ret = OB_SUCCESS;
+  const ObLoadArgument &load_args = load_stmt.get_load_arguments();
+  const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
+      load_stmt.get_field_or_var_list();
+  const uint64_t tenant_id = load_args.tenant_id_;
+  const uint64_t table_id = load_args.table_id_;
+  ObSchemaGetterGuard schema_guard;
+  const ObTableSchema *table_schema = nullptr;
+  if (OB_FAIL(
+          ObMultiVersionSchemaService::get_instance().get_tenant_schema_guard(
+              tenant_id, schema_guard))) {
+    LOG_WARN("fail to get tenant schema guard", KR(ret), K(tenant_id));
+  } else if (OB_FAIL(schema_guard.get_table_schema(tenant_id, table_id,
+                                                   table_schema))) {
+    LOG_WARN("fail to get table schema", KR(ret), K(tenant_id), K(table_id));
+  } else if (OB_ISNULL(table_schema)) {
+    ret = OB_TABLE_NOT_EXIST;
+    LOG_WARN("table not exist", KR(ret), K(tenant_id), K(table_id));
+  } else if (OB_UNLIKELY(table_schema->is_heap_table())) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_WARN("not support heap table", KR(ret));
+  }
+
   // init sstable_writer_
-  else if (OB_FAIL(sstable_writer_->init(table_schema))) {
+  if (OB_FAIL(sstable_writer_->init(table_schema))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
   // init macro_block_writer_
   else if (OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
     LOG_WARN("failed to init macro block writer", K(ret));
-  }
-  // set memory sort allocator
-  else {
-    external_sort_.set_dispatch_queue(dispatcher_->get_dispatch_queue(index_));
   }
   return ret;
 }
@@ -1561,7 +1598,7 @@ int ObLoadDataDirectDemo::do_process() {
   return ret;
 }
 
-int ObLoadDataDirectDemo::do_load() {
+int ObLoadDataDirectDemo::do_load1() {
   int ret = OB_SUCCESS;
   const ObLoadDatumRow *datum_row = nullptr;
 
@@ -1594,9 +1631,37 @@ int ObLoadDataDirectDemo::do_load() {
   end=clock();
   t=(end-start)/CLOCKS_PER_SEC;
   LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "external sort time",t);
+  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "load1 data num", count_);
 
   while (OB_SUCC(ret)) {
     if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
+      if (OB_UNLIKELY(OB_ITER_END != ret)) {
+        LOG_WARN("fail to get next row", KR(ret));
+      } else {
+        sort_queue_->finish();
+        ret = OB_SUCCESS;
+        break;
+      }
+    } else if (OB_FAIL(sort_queue_->push_item(datum_row))) {
+      LOG_WARN("fail to append row", KR(ret));
+    }
+  }
+
+  return ret;
+}
+
+int ObLoadDataDirectDemo::do_load2() {
+  int ret = OB_SUCCESS;
+  const ObLoadDatumRow *datum_row = nullptr;
+
+  int count_ = 0;
+  clock_t start, end;
+  int64_t t;
+
+  start = clock();
+
+  while (OB_SUCC(ret)) {
+    if (OB_FAIL(sort_queue_->pop_item(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
       } else {
@@ -1605,20 +1670,23 @@ int ObLoadDataDirectDemo::do_load() {
       }
     } else if (OB_FAIL(sstable_writer_->append_row(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
+    } else {
+      sort_queue_->wait_switch_pop();
     }
   }
 
   if (OB_SUCC(ret)) {
     if (OB_FAIL(sstable_writer_->close())) {
       LOG_WARN("fail to close sstable writer", KR(ret));
+    } else {
+      sort_queue_->reset();
     }
   }
 
   end = clock();
   t = (end - start) / CLOCKS_PER_SEC;
-  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "sstable time",t);
-
-  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "load data num", count_);
+  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "sstable time", t);
+  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "load2 data num", count_);
 
   return ret;
 }

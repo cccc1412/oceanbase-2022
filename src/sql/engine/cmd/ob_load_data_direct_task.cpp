@@ -19,7 +19,7 @@ ObAsyncTask *ObLoadDataDirectTask::deep_copy(char *buf,
   } else {
     task =
         new (buf) ObLoadDataDirectTask(index_, ctx_, stmt_, offset_, end_, stage_process_,
-                                       dispatcher_, sstable_writer_);
+                                       dispatcher_, sort_queue_, sstable_writer_);
   }
   return task;
 }
@@ -39,7 +39,7 @@ int ObLoadDataDirectTask::process() {
     ret = OB_ALLOCATE_MEMORY_FAILED;
     LOG_WARN("allocate memory failed", K(ret));
   } else if (OB_FAIL(load_direct->init(index_, stmt_, offset_, end_, stage_process_,
-                                       dispatcher_, sstable_writer_))) {
+                                       dispatcher_, sort_queue_, sstable_writer_))) {
     LOG_WARN("failed to execute load data stmt", K(ret));
   } else {
     if (OB_FAIL(load_direct->execute(ctx_, stmt_))) {

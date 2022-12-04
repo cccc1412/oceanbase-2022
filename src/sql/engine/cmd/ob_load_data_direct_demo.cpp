@@ -159,9 +159,9 @@ int ObLoadSequentialFileReader::read_next_buffer(ObLoadDataBuffer &buffer) {
     } else {
       offset_ += read_size;
       buffer.produce(read_size);
-      if (OB_UNLIKELY(offset_ == end_)) {
-        buffer.is_end=true;
-      }
+      // if (OB_UNLIKELY(offset_ == end_)) {
+      //   buffer.is_end=true;
+      // }
     }
   }
   return ret;
@@ -220,34 +220,7 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
   } else {
     const char *str = buffer.begin();
     const char *end = buffer.end();
-    if (OB_SUCC(csv_parser_.scan_easy(str, end,buffer.is_end))) {
-      buffer.consume(str - buffer.begin());
-      const ObIArray<ObCSVGeneralParser::FieldValue> &field_values_in_file =
-          csv_parser_.get_fields_per_line();
-      for (int64_t i = 0; i < row_.count_; ++i) {
-        const ObCSVGeneralParser::FieldValue &str_v =
-            field_values_in_file.at(i);
-        ObObj &obj = row_.cells_[i];
-        if (str_v.is_null_) {
-          obj.set_null();
-        } else {
-          obj.set_string(ObVarcharType, ObString(str_v.len_, str_v.ptr_));
-          obj.set_collation_type(collation_type_);
-        }
-      }
-      row = &row_;
-    }
-
-    // int64_t nrows = 1;
-    // if (OB_FAIL(csv_parser_.scan(str, end, nrows, nullptr, nullptr,
-    //                              unused_row_handler_, err_records_, false))) {
-    //   LOG_WARN("fail to scan buffer", KR(ret));
-    // } else if (OB_UNLIKELY(!err_records_.empty())) {
-    //   ret = err_records_.at(0).err_code;
-    //   LOG_WARN("fail to parse line", KR(ret));
-    // } else if (0 == nrows) {
-    //   ret = OB_ITER_END;
-    // } else {
+    // if (OB_SUCC(csv_parser_.scan_easy(str, end,buffer.is_end))) {
     //   buffer.consume(str - buffer.begin());
     //   const ObIArray<ObCSVGeneralParser::FieldValue> &field_values_in_file =
     //       csv_parser_.get_fields_per_line();
@@ -264,6 +237,33 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
     //   }
     //   row = &row_;
     // }
+
+    int64_t nrows = 1;
+    if (OB_FAIL(csv_parser_.scan(str, end, nrows, nullptr, nullptr,
+                                 unused_row_handler_, err_records_, false))) {
+      LOG_WARN("fail to scan buffer", KR(ret));
+    } else if (OB_UNLIKELY(!err_records_.empty())) {
+      ret = err_records_.at(0).err_code;
+      LOG_WARN("fail to parse line", KR(ret));
+    } else if (0 == nrows) {
+      ret = OB_ITER_END;
+    } else {
+      buffer.consume(str - buffer.begin());
+      const ObIArray<ObCSVGeneralParser::FieldValue> &field_values_in_file =
+          csv_parser_.get_fields_per_line();
+      for (int64_t i = 0; i < row_.count_; ++i) {
+        const ObCSVGeneralParser::FieldValue &str_v =
+            field_values_in_file.at(i);
+        ObObj &obj = row_.cells_[i];
+        if (str_v.is_null_) {
+          obj.set_null();
+        } else {
+          obj.set_string(ObVarcharType, ObString(str_v.len_, str_v.ptr_));
+          obj.set_collation_type(collation_type_);
+        }
+      }
+      row = &row_;
+    }
   }
   return ret;
 }

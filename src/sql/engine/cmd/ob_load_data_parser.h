@@ -444,9 +444,10 @@ int ObCSVGeneralParser::scan_proto_easy(const char *&str, const char *end,
   } else {
     ret = OB_ITER_END;
   }
-  
+
   return ret;
 }
+
 }
 }
 

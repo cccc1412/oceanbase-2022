@@ -1032,7 +1032,6 @@ private:
   uint64_t tenant_id_;
   int64_t dir_id_;
   bool is_writer_opened_;
-  common::ObSpinLock lock_;
 };
 
 template <typename T, typename Compare>
@@ -1144,12 +1143,8 @@ int ObExternalSortRound<T, Compare>::add_fragment_iter(
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObExternalSortRound has not been inited", K(ret));
-  } else if (OB_FAIL(lock_.lock())) {
-    STORAGE_LOG(WARN, "fail to lock", K(ret));
   } else if (OB_FAIL(iters_.push_back(iter))) {
     STORAGE_LOG(WARN, "fail to add iterator", K(ret));
-  } else if (OB_FAIL(lock_.unlock())) {
-    STORAGE_LOG(WARN, "fail to unlock", K(ret));
   }
   return ret;
 }
@@ -1875,20 +1870,17 @@ int ObMemorySortRound<T, Compare>::finish_reuse() {
     STORAGE_LOG(WARN, "ObMemorySortRound has not been inited", K(ret));
   } else if (0 == item_list_.size()) {
     has_data_ = false;
-  } else if (0 == next_round_->get_fragment_count()) {
-    is_in_memory_ = true;
-    has_data_ = true;
+  } else {
     std::sort(item_list_.begin(), item_list_.end(), *compare_);
     if (OB_FAIL(compare_->result_code_)) {
       STORAGE_LOG(WARN, "fail to sort item list", K(ret));
-    }
-  } else {
-    is_in_memory_ = false;
-    has_data_ = true;
-    if (OB_FAIL(build_fragment_reuse())) {
-      STORAGE_LOG(WARN, "fail to build fragment", K(ret));
-    } else if (OB_FAIL(next_round_->finish_write())) {
-      STORAGE_LOG(WARN, "fail to do next round finish write", K(ret));
+    } else if (OB_FAIL(build_iterator())) {
+      STORAGE_LOG(WARN, "fail to build memory iterator", K(ret));
+    } else if (OB_FAIL(next_round_->add_fragment_iter(iter_))) {
+      STORAGE_LOG(WARN, "fail to add fragment iter", K(ret));
+    } else {
+      is_in_memory_ = false;
+      has_data_ = true;
     }
   }
   return ret;
@@ -2175,10 +2167,6 @@ int ObExternalSort<T, Compare>::do_sort_reuse(const bool final_merge) {
     STORAGE_LOG(WARN, "ObExternalSort has not been inited", K(ret));
   } else if (OB_FAIL(memory_sort_round_.finish_reuse())) {
     STORAGE_LOG(WARN, "fail to finish memory sort round", K(ret));
-  } else if (memory_sort_round_.has_data() &&
-             memory_sort_round_.is_in_memory()) {
-    STORAGE_LOG(INFO, "all data sorted in memory");
-    is_empty_ = false;
   } else if (0 == curr_round_->get_fragment_count()) {
     is_empty_ = true;
     ret = common::OB_SUCCESS;

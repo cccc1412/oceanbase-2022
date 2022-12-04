@@ -612,7 +612,7 @@ ObLoadDispatcher::ObLoadDispatcher(int thread_num, int dispatch_num)
     : is_inited_(false), thread_num_(thread_num), is_finished_(false),
       finish_smapling_(false), finish_smapling_stat_(false),
       allocator_(ObModIds::OB_SQL_LOAD_DATA), current_num_(0),
-      dispatch_num_(dispatch_num) {}
+      smapling_allocator_(ObModIds::OB_SQL_LOAD_DATA), dispatch_num_(dispatch_num) {}
 
 ObLoadDispatcher::~ObLoadDispatcher() {
   for (int i = 0; i < dispatch_num_; i++) {
@@ -631,6 +631,7 @@ int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
     LOG_WARN("invalid args", KR(ret));
   } else {
     allocator_.set_tenant_id(MTL_ID());
+    smapling_allocator_.set_tenant_id(MTL_ID());
     const int64_t rowkey_column_num = table_schema->get_rowkey_column_num();
     ObArray<ObColDesc> multi_version_column_descs;
     if (OB_FAIL(table_schema->get_multi_version_column_descs(
@@ -703,11 +704,10 @@ int ObLoadDispatcher::do_dispatch_all() {
     if (OB_FAIL(do_dispatch_one(item))) {
       LOG_WARN("fail to do dispatch one", KR(ret));
       break;
-    } else {
-      ob_free((void *)item);
     }
   }
   smapling_data_.reset();
+  smapling_allocator_.reset();
   return ret;
 }
 
@@ -850,10 +850,13 @@ int ObLoadDispatcher::append_row(const ObLoadDatumRow &datum_row) {
     ObLoadDatumRow *new_item = nullptr;
     const int64_t item_size =
         sizeof(ObLoadDatumRow) + datum_row.get_deep_copy_size();
-    if (OB_ISNULL(buf = static_cast<char *>(ob_malloc(
-                      item_size, ObMemAttr(MTL_ID(), "dispatcher"))))) {
+    if (OB_FAIL(lock_.lock())) {
+      LOG_WARN("fail to lock memory");
+    } else if (OB_ISNULL(buf = static_cast<char *>(smapling_allocator_.alloc(item_size)))) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("fail to allocate memory", K(ret), K(item_size));
+    } else if (OB_FAIL(lock_.unlock())) {
+      LOG_WARN("fail to unlock memory");
     } else if (OB_ISNULL(new_item = new (buf) ObLoadDatumRow())) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       LOG_WARN("fail to placement new item", K(ret));

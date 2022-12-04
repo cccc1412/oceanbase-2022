@@ -272,6 +272,7 @@ private:
 
   std::atomic<int64_t> current_num_;
   LoadDatumRowVector smapling_data_;
+  common::ObArenaAllocator smapling_allocator_;
   Lock smapling_data_lock_;
 
   int dispatch_num_;
@@ -293,29 +294,29 @@ public:
     pop_sleep_time=pop_sleep;
   };
 
-  int push_item(const ObLoadDatumRow *item) {
-    int ret = OB_SUCCESS;
-    char *buf = NULL;
-    ObLoadDatumRow *new_item = NULL;
-    // 额外多分配了一个单位的内存，第一个内存记录是否已经初始化
-    int64_t buf_pos = sizeof(ObLoadDatumRow);
-    const int64_t item_size = buf_pos + item->get_deep_copy_size();
-    const int64_t alloc_size = 1 + item_size;
-    if (OB_ISNULL(
-            buf = static_cast<char *>(DispatchSortQueue::alloc(alloc_size)))) {
-      ret = common::OB_ALLOCATE_MEMORY_FAILED;
-      STORAGE_LOG(WARN, "fail to allocate memory", K(ret), K(alloc_size));
-    } else if (OB_ISNULL(new_item = new (buf + 1) ObLoadDatumRow())) {
-      ret = common::OB_ALLOCATE_MEMORY_FAILED;
-      STORAGE_LOG(WARN, "fail to placement new item", K(ret));
-    } else if (OB_FAIL(
-                   new_item->deep_copy(*item, buf + 1, item_size, buf_pos))) {
-      STORAGE_LOG(WARN, "fail to deep copy item", K(ret));
-    } else {
-      buf[0] = 1;
-    }
-    return ret;
-  }
+  // int push_item(const ObLoadDatumRow *item) {
+  //   int ret = OB_SUCCESS;
+  //   char *buf = NULL;
+  //   ObLoadDatumRow *new_item = NULL;
+  //   // 额外多分配了一个单位的内存，第一个内存记录是否已经初始化
+  //   int64_t buf_pos = sizeof(ObLoadDatumRow);
+  //   const int64_t item_size = buf_pos + item->get_deep_copy_size();
+  //   const int64_t alloc_size = 1 + item_size;
+  //   if (OB_ISNULL(
+  //           buf = static_cast<char *>(DispatchSortQueue::alloc(alloc_size)))) {
+  //     ret = common::OB_ALLOCATE_MEMORY_FAILED;
+  //     STORAGE_LOG(WARN, "fail to allocate memory", K(ret), K(alloc_size));
+  //   } else if (OB_ISNULL(new_item = new (buf + 1) ObLoadDatumRow())) {
+  //     ret = common::OB_ALLOCATE_MEMORY_FAILED;
+  //     STORAGE_LOG(WARN, "fail to placement new item", K(ret));
+  //   } else if (OB_FAIL(
+  //                  new_item->deep_copy(*item, buf + 1, item_size, buf_pos))) {
+  //     STORAGE_LOG(WARN, "fail to deep copy item", K(ret));
+  //   } else {
+  //     buf[0] = 1;
+  //   }
+  //   return ret;
+  // }
 
   void debug_print(int i) {
     auto print_func = [&,i]() {
@@ -334,41 +335,41 @@ public:
   }
 
 private:
-  void *alloc(int64_t size) {
-    char *buf = NULL;
-    if (size > buf_mem_limit) {
-      STORAGE_LOG(WARN,
-                  "invalid item size, must not larger than buf memory limit",
-                  K(size), K(buf_mem_limit));
-    } else if (push_used + size > buf_mem_limit) {
-      // 重新添加时发现超过容量，必须分配完这次再切换
-      buf = static_cast<char *>(push_alloc->alloc(size));
-      if (OB_ISNULL(buf)) {
-        STORAGE_LOG(WARN, "fail to alloc memory", K(size), K(buf_mem_limit));
-      } else {
-        buf[0] = 0;
-        dispatch_data_[push_alloc_id].push_back((ObLoadDatumRow *)buf);
-        push_used += size;
-        wait_switch_push();
-        push_size = push_used;
-        push_used = 0;
-        push_alloc_id = (push_alloc_id + 1) % 2;
-        push_alloc = allocator_[push_alloc_id];
-      }
-    } else {
-      buf = static_cast<char *>(push_alloc->alloc(size));
-      if (OB_ISNULL(buf)) {
-        STORAGE_LOG(WARN, "fail to alloc memory", K(size), K(buf_mem_limit));
-      } else {
-        buf[0] = 0;
-        dispatch_data_[push_alloc_id].push_back((ObLoadDatumRow *)buf);
-        push_used += size;
-        if (push_alloc == pop_alloc)
-          push_size = push_used;
-      }
-    }
-    return buf;
-  }
+  // void *alloc(int64_t size) {
+  //   char *buf = NULL;
+  //   if (size > buf_mem_limit) {
+  //     STORAGE_LOG(WARN,
+  //                 "invalid item size, must not larger than buf memory limit",
+  //                 K(size), K(buf_mem_limit));
+  //   } else if (push_used + size > buf_mem_limit) {
+  //     // 重新添加时发现超过容量，必须分配完这次再切换
+  //     buf = static_cast<char *>(push_alloc->alloc(size));
+  //     if (OB_ISNULL(buf)) {
+  //       STORAGE_LOG(WARN, "fail to alloc memory", K(size), K(buf_mem_limit));
+  //     } else {
+  //       buf[0] = 0;
+  //       dispatch_data_[push_alloc_id].push_back((ObLoadDatumRow *)buf);
+  //       push_used += size;
+  //       wait_switch_push();
+  //       push_size = push_used;
+  //       push_used = 0;
+  //       push_alloc_id = (push_alloc_id + 1) % 2;
+  //       push_alloc = allocator_[push_alloc_id];
+  //     }
+  //   } else {
+  //     buf = static_cast<char *>(push_alloc->alloc(size));
+  //     if (OB_ISNULL(buf)) {
+  //       STORAGE_LOG(WARN, "fail to alloc memory", K(size), K(buf_mem_limit));
+  //     } else {
+  //       buf[0] = 0;
+  //       dispatch_data_[push_alloc_id].push_back((ObLoadDatumRow *)buf);
+  //       push_used += size;
+  //       if (push_alloc == pop_alloc)
+  //         push_size = push_used;
+  //     }
+  //   }
+  //   return buf;
+  // }
 };
 
 class ObLoadDataDirectDemo : public ObLoadDataBase {

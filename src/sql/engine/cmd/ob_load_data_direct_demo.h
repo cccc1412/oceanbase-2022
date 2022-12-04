@@ -43,6 +43,8 @@ public:
   OB_INLINE void consume(int64_t size) { begin_pos_ += size; }
   OB_INLINE void produce(int64_t size) { end_pos_ += size; }
 
+  bool is_end=false;
+
 private:
   common::ObArenaAllocator allocator_;
   char *data_;

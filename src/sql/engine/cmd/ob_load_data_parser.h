@@ -98,7 +98,7 @@ public:
                  bool is_end_file);
 
   template<common::ObCharsetType cs_type>
-  int scan_proto_easy(const char *&str, const char *end);
+  int scan_proto_easy(const char *&str, const char *end,bool is_end);
 
   template<typename handle_func, bool DO_ESCAPE = false>
   int scan(const char *&str, const char *end, int64_t &nrows,
@@ -128,20 +128,20 @@ public:
     return ret;
   }
 
-  int scan_easy(const char *&str, const char *end) {
+  int scan_easy(const char *&str, const char *end,bool is_end) {
     int ret = common::OB_SUCCESS;
     switch (format_.cs_type_) {
     case common::CHARSET_UTF8MB4:
-      ret = scan_proto_easy<common::CHARSET_UTF8MB4>(str, end);
+      ret = scan_proto_easy<common::CHARSET_UTF8MB4>(str, end, is_end);
       break;
     case common::CHARSET_GBK:
-      ret = scan_proto_easy<common::CHARSET_GBK>(str, end);
+      ret = scan_proto_easy<common::CHARSET_GBK>(str, end, is_end);
       break;
     case common::CHARSET_GB18030:
-      ret = scan_proto_easy<common::CHARSET_GB18030>(str, end);
+      ret = scan_proto_easy<common::CHARSET_GB18030>(str, end, is_end);
       break;
     default:
-      ret = scan_proto_easy<common::CHARSET_BINARY>(str, end);
+      ret = scan_proto_easy<common::CHARSET_BINARY>(str, end, is_end);
       break;
     }
     return ret;
@@ -416,7 +416,8 @@ int ObCSVGeneralParser::scan_proto(const char *&str,
 }
 
 template <common::ObCharsetType cs_type>
-int ObCSVGeneralParser::scan_proto_easy(const char *&str, const char *end) {
+int ObCSVGeneralParser::scan_proto_easy(const char *&str, const char *end,
+                                        bool is_end) {
   int ret=OB_SUCCESS;
   const char *begin=str;
   const char *last_field_begin=begin;
@@ -436,14 +437,16 @@ int ObCSVGeneralParser::scan_proto_easy(const char *&str, const char *end) {
     }
   }
 
-  if (!find) {
-    ret = OB_ITER_END;
-  } else {
+  if (find) {
     str=begin;
+  } else if (OB_UNLIKELY(is_end) && field_idx == format_.file_column_nums_) {
+    str = begin;
+  } else {
+    ret = OB_ITER_END;
   }
+  
   return ret;
 }
-
 }
 }
 

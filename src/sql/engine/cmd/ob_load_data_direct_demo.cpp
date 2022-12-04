@@ -159,6 +159,9 @@ int ObLoadSequentialFileReader::read_next_buffer(ObLoadDataBuffer &buffer) {
     } else {
       offset_ += read_size;
       buffer.produce(read_size);
+      if (OB_UNLIKELY(offset_ == end_)) {
+        buffer.is_end=true;
+      }
     }
   }
   return ret;
@@ -217,7 +220,7 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
   } else {
     const char *str = buffer.begin();
     const char *end = buffer.end();
-    if (OB_SUCC(csv_parser_.scan_easy(str, end))) {
+    if (OB_SUCC(csv_parser_.scan_easy(str, end,buffer.is_end))) {
       buffer.consume(str - buffer.begin());
       const ObIArray<ObCSVGeneralParser::FieldValue> &field_values_in_file =
           csv_parser_.get_fields_per_line();

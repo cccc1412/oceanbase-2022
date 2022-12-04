@@ -22,10 +22,10 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t PROCESS_THREAD_NUM = 5;
+  static const int64_t PROCESS_THREAD_NUM = 7;
   static const int64_t LOAD_THREAD_NUM = 11;
-  static const int64_t SORT_QUEUE_BUFFER_SIZE = (1LL<<20)*256LL;
-  static const int64_t SORT_QUEUE_SLEEP_TIME = 400000;
+  static const int64_t SORT_QUEUE_BUFFER_SIZE = (1LL<<20)*384LL;
+  static const int64_t SORT_QUEUE_SLEEP_TIME = 600000;
 public:
   ObLoadDataExecutor() : allocator_(ObModIds::OB_SQL_LOAD_DATA) { allocator_.set_tenant_id(MTL_ID()); }
   virtual ~ObLoadDataExecutor() {}

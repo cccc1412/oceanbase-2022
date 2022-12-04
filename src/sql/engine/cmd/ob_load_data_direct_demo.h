@@ -19,12 +19,12 @@ namespace oceanbase {
 namespace sql {
 
 static const int64_t MAX_RECORD_SIZE = (1LL << 12);         // 4K
-static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 576LL; // 576M
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 540LL; // 540M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);        // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);            // 1M
 static const int64_t BUFFER_NUM = (4LL << 20);              // 4M
 
-static const uint64_t SLEEP_TIME = 800000;
+static const uint64_t SLEEP_TIME = 500000;
 
 class ObLoadDataBuffer {
 public:
@@ -281,15 +281,16 @@ private:
 
 class DispatchSortQueue : public DispatchQueue<ObLoadDatumRow> {
 public:
-  DispatchSortQueue() : DispatchQueue(0, 0){};
+  DispatchSortQueue() : DispatchQueue(0, 0, 0){};
   ~DispatchSortQueue() = default;
 
   void init(common::ObArenaAllocator *allocator0,
             common::ObArenaAllocator *allocator1, int64_t mem_limit,
-            uint64_t sleep) {
+            uint64_t push_sleep, uint64_t pop_sleep) {
     DispatchQueue::init(allocator0, allocator1);
     buf_mem_limit = mem_limit;
-    sleep_time = sleep;
+    push_sleep_time = push_sleep;
+    pop_sleep_time=pop_sleep;
   };
 
   int push_item(const ObLoadDatumRow *item) {
@@ -320,7 +321,7 @@ public:
     auto print_func = [&,i]() {
       while (!this->is_finished ||
              this->get_pop_size() < this->get_push_size()) {
-        usleep(this->sleep_time);
+        usleep(this->pop_sleep_time);
         int64_t pop_size = this->get_pop_size() / (1LL << 20);
         int64_t push_size = this->get_push_size() / (1LL << 20);
         int64_t remain_size = push_size - pop_size;

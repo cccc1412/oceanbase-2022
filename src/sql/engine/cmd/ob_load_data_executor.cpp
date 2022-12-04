@@ -53,7 +53,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
       LOG_WARN("fail to alloc memory", KR(ret));
     } else {
       sort_queues[i].init(allocator1, allocator2, SORT_QUEUE_BUFFER_SIZE,
-                          SORT_QUEUE_SLEEP_TIME);
+                          SORT_QUEUE_SLEEP_TIME, SORT_QUEUE_SLEEP_TIME/2);
     }
   }
   if (OB_SUCC(ret)) {

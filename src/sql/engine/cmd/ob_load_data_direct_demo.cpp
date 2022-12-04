@@ -668,8 +668,8 @@ int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
         } else if (OB_ISNULL(
                        buf = allocator_.alloc(sizeof(ObLoadDispatchQueue)))) {
           LOG_WARN("fail to alloc memory", KR(ret));
-        } else if (OB_ISNULL(dispatch_queue = new (buf)
-                                 ObLoadDispatchQueue(MEM_BUFFER_SIZE,SLEEP_TIME))) {
+        } else if (OB_ISNULL(dispatch_queue = new (buf) ObLoadDispatchQueue(
+                                 MEM_BUFFER_SIZE, SLEEP_TIME, 2*SLEEP_TIME))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(buf =
                                  allocator_.alloc(sizeof(ObArenaAllocator)))) {

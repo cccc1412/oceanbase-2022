@@ -1372,10 +1372,11 @@ template <typename T> class DispatchQueue {
   typedef common::ObVector<T *> DatumRowVector;
 
 public:
-  DispatchQueue(int64_t mem_limit,uint64_t sleep)
+  DispatchQueue(int64_t mem_limit, uint64_t push_sleep, uint64_t pop_sleep)
       : is_finished(false), push_used(0), push_size(0), pop_size(0),
         pop_index(0), push_alloc_id(0), pop_alloc_id(0),
-        buf_mem_limit(mem_limit),sleep_time(sleep){};
+        buf_mem_limit(mem_limit), push_sleep_time(push_sleep),
+        pop_sleep_time(push_sleep){};
   ~DispatchQueue(){ reset();};
 
   void init(common::ObArenaAllocator *allocator0,
@@ -1413,11 +1414,11 @@ public:
 
   int pop_item(const T *&item) {
     while (!is_finished && pop_size == push_size)
-      usleep(sleep_time);
+      usleep(pop_sleep_time);
     if (pop_size < push_size) {
       char *buf = (char *)dispatch_data_[pop_alloc_id].at(pop_index);
       while (buf[0]==0)
-        usleep(sleep_time);
+        usleep(pop_sleep_time);
       item = (T *)(buf+1);
       const int64_t alloc_size = 1 + sizeof(T) + item->get_deep_copy_size();
       pop_index++;
@@ -1511,7 +1512,7 @@ protected:
     common::ObArenaAllocator *new_push_alloc =
         allocator_[(push_alloc_id + 1) % 2];
     while (new_push_alloc == pop_alloc)
-      usleep(sleep_time);
+      usleep(push_sleep_time);
   }
 
 protected:
@@ -1528,7 +1529,8 @@ protected:
   common::ObArenaAllocator *pop_alloc;
   Lock lock;
   int64_t buf_mem_limit;
-  uint64_t sleep_time;
+  uint64_t push_sleep_time;
+  uint64_t pop_sleep_time;
 };
 
 template <typename T>

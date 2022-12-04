@@ -42,7 +42,7 @@ struct ObExternalSortConstant {
       8 * 1024LL * 1024LL; // min memory limit is 8m
   static const int64_t DEFAULT_FILE_READ_WRITE_BUFFER = 2 * 1024 * 1024LL; // 2m
   static const int64_t MIN_MULTIPLE_MERGE_COUNT = 2;
-  static const int64_t DECOMPRESS_BUFFER_SIZE = 2*2<<20L;
+  static const int64_t DECOMPRESS_BUFFER_SIZE = 4*1024LL*1024LL;
   static inline int get_io_timeout_ms(const int64_t expire_timestamp,
                                       int64_t &wait_time_ms);
   static inline bool is_timeout(const int64_t expire_timestamp);
@@ -198,7 +198,7 @@ private:
   uint64_t tenant_id_;
   int64_t current_size_;
   int64_t first_buf_size_;
-  common::ObLZ4Compressor191 compressor_;
+  common::ObLZ4Compressor compressor_;
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
 };
 
@@ -334,11 +334,10 @@ template <typename T> int ObFragmentWriterV2<T>::flush_buffer(bool is_end_flush)
     } else {
       io_info.size_ = compress_size + 16;
     }
-    if(is_end_flush) {
-      io_info.size_ += 8;
-    }
+    //if(is_end_flush) {
+    //  io_info.size_ += 8;
+    //}
     io_info.tenant_id_ = tenant_id_;
-    // io_info.buf_ = buf_;
     io_info.buf_ = compress_buf_;
     io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
     io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_WRITE);
@@ -361,18 +360,18 @@ template <typename T> int ObFragmentWriterV2<T>::sync() {
       if (OB_FAIL(flush_buffer(true))) {
         STORAGE_LOG(WARN, "fail to flush buffer", K(ret));
       }
-      //int64_t data_end = 0;
-      //blocksstable::ObTmpFileIOInfo io_info;
-      //io_info.fd_ = fd_;
-      //io_info.dir_id_ = dir_id_;
-      //io_info.size_ = 8;
-      //io_info.tenant_id_ = tenant_id_;
-      //io_info.buf_ = (char*)&data_end;
-      //io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
-      //io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_WRITE);
-      //if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
-      //  STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
-      //}
+      int64_t data_end = -1;
+      blocksstable::ObTmpFileIOInfo io_info;
+      io_info.fd_ = fd_;
+      io_info.dir_id_ = dir_id_;
+      io_info.size_ = 8;
+      io_info.tenant_id_ = tenant_id_;
+      io_info.buf_ = (char*)&data_end;
+      io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
+      io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_WRITE);
+      if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
+        STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
+      }
     }
     if (OB_SUCC(ret)) {
       int64_t timeout_ms = 0;
@@ -429,7 +428,7 @@ public:
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 
 private:
-  common::ObLZ4Compressor191 compressor_;
+  common::ObLZ4Compressor compressor_;
   const char *buf_;
   char *decompress_buf_;
   int64_t buf_pos_;

@@ -24,7 +24,7 @@ static const int64_t FILE_BUFFER_SIZE = (2LL << 20);        // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);            // 1M
 static const int64_t BUFFER_NUM = (4LL << 20);              // 4M
 
-static const uint64_t SLEEP_TIME = 500000;
+static const uint64_t SLEEP_TIME = 200000;
 
 class ObLoadDataBuffer {
 public:

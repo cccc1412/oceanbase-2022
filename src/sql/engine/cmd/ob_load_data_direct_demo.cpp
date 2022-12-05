@@ -273,8 +273,8 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
  */
 
 ObLoadDatumRow::ObLoadDatumRow()
-    : allocator_(ObModIds::OB_SQL_LOAD_DATA), capacity_(0), count_(0),
-      datums_(nullptr) {}
+    : radix_value(0), allocator_(ObModIds::OB_SQL_LOAD_DATA), capacity_(0),
+      count_(0), datums_(nullptr) {}
 
 ObLoadDatumRow::~ObLoadDatumRow() {}
 
@@ -333,6 +333,7 @@ int ObLoadDatumRow::deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
       }
     }
     if (OB_SUCC(ret)) {
+      radix_value=src.radix_value;
       capacity_ = datum_cnt;
       count_ = datum_cnt;
       datums_ = datums;
@@ -417,37 +418,7 @@ int ObLoadDatumRowCompare::init(int64_t rowkey_column_num,
 
 bool ObLoadDatumRowCompare::operator()(const ObLoadDatumRow *lhs,
                                        const ObLoadDatumRow *rhs) {
-  int ret = OB_SUCCESS;
-  int cmp_ret = 0;
-  if (IS_NOT_INIT) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("ObDirectLoadDatumRowCompare not init", KR(ret), KP(this));
-  } else if (OB_ISNULL(lhs) || OB_ISNULL(rhs) ||
-             OB_UNLIKELY(!lhs->is_valid() || !rhs->is_valid())) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("invalid args", KR(ret), KPC(lhs), KPC(rhs));
-  } else if (OB_UNLIKELY(lhs->count_ < rowkey_column_num_ ||
-                         rhs->count_ < rowkey_column_num_)) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("unexpected column count", KR(ret), KPC(lhs), KPC(rhs),
-             K_(rowkey_column_num));
-  } else {
-    if (OB_FAIL(lhs_rowkey_.assign(lhs->datums_, rowkey_column_num_))) {
-      LOG_WARN("fail to assign datum rowkey", KR(ret), K(lhs),
-               K_(rowkey_column_num));
-    } else if (OB_FAIL(rhs_rowkey_.assign(rhs->datums_, rowkey_column_num_))) {
-      LOG_WARN("fail to assign datum rowkey", KR(ret), K(rhs),
-               K_(rowkey_column_num));
-    } else if (OB_FAIL(
-                   lhs_rowkey_.compare(rhs_rowkey_, *datum_utils_, cmp_ret))) {
-      LOG_WARN("fail to compare rowkey", KR(ret), K(rhs_rowkey_),
-               K(rhs_rowkey_), KP(datum_utils_));
-    }
-  }
-  if (OB_FAIL(ret)) {
-    result_code_ = ret;
-  }
-  return cmp_ret < 0;
+  return lhs->radix_value<rhs->radix_value;
 }
 
 /**
@@ -564,6 +535,9 @@ int ObLoadRowCaster::get_casted_row(const ObNewRow &new_row,
       }
     }
     if (OB_SUCC(ret)) {
+      int64_t id0 = datum_row_.datums_[0].get_int();
+      int64_t id1 = datum_row_.datums_[1].get_int();
+      datum_row_.radix_value=(id0*100)+id1;
       datum_row = &datum_row_;
     }
   }

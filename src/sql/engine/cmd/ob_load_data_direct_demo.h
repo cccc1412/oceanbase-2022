@@ -109,6 +109,7 @@ public:
   int deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
                 int64_t &pos);
   OB_INLINE bool is_valid() const { return count_ > 0 && nullptr != datums_; }
+  int64_t radix_value;
   DECLARE_TO_STRING;
 
 public:

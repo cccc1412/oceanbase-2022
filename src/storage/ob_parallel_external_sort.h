@@ -45,6 +45,32 @@ struct ObExternalSortConstant {
   static inline bool is_timeout(const int64_t expire_timestamp);
 };
 
+// template <typename T> void radix_sort(common::ObVector<T *> list, const int radix, int size) {
+//   auto begin = list.begin();
+//   auto end=list.end();
+//   common::ObVector<T *> t_list1[radix],t_list2[radix];
+//   auto &src = t_list1;
+//   auto &dst = t_list2;
+//   for (; begin != end; ++begin)
+//     (*src)[_parser(*begin, 0)].push_back(*begin);
+//   int pass = 1;
+//   while (1) {
+//     for (const auto &v : *src)
+//       for (const auto &i : v)
+//         (*dst)[_parser(i, pass)].push_back(i);
+//     if (++pass == _pass)
+//       break;
+//     std::swap(src, dst);
+//     for (auto &v : *dst)
+//       v.clear();
+//   }
+//   for (const auto &v : *dst)
+//     for (const auto &i : v) {
+//       *_begin = i;
+//       ++_begin;
+//     }
+// }
+
 int ObExternalSortConstant::get_io_timeout_ms(const int64_t expire_timestamp,
                                               int64_t &wait_time_ms) {
   int ret = common::OB_SUCCESS;

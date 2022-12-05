@@ -118,8 +118,8 @@ template <typename T> ObMacroBufferWriter<T>::~ObMacroBufferWriter() {}
 
 template <typename T> int ObMacroBufferWriter<T>::write_item(const T &item) {
   int ret = common::OB_SUCCESS;
-  //if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
-  if(ObExternalSortConstant::MAX_SERIALIZE_SIZE + buf_pos_ > buf_cap_) {
+  if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
+  //if(ObExternalSortConstant::MAX_SERIALIZE_SIZE + buf_pos_ > buf_cap_) {
     ret = common::OB_EAGAIN;
   } else if (OB_FAIL(item.serialize(buf_, buf_cap_, buf_pos_))) {
     STORAGE_LOG(WARN, "fail to serialize item", K(ret));

@@ -380,6 +380,9 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
       count_ = count;
     }
   }
+  int64_t id0 = datums_[0].get_int();
+  int64_t id1 = datums_[1].get_int();
+  radix_value = (id0 * 100) + id1;
   return ret;
 }
 

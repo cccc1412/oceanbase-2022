@@ -19,7 +19,7 @@ namespace oceanbase {
 namespace sql {
 
 static const int64_t MAX_RECORD_SIZE = (1LL << 12);          // 4K
-static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 540LL;  // 540M
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 512LL;  // 540M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);         // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);             // 1M
 static const int64_t BUFFER_NUM = (3LL << 20) + (6LL << 19); // 4M
@@ -109,7 +109,8 @@ public:
   int deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
                 int64_t &pos);
   OB_INLINE bool is_valid() const { return count_ > 0 && nullptr != datums_; }
-  int64_t radix_value;
+  storage::radix_value value;
+  int radix_id;
   DECLARE_TO_STRING;
 
 public:
@@ -117,6 +118,32 @@ public:
   int64_t capacity_;
   int64_t count_;
   blocksstable::ObStorageDatum *datums_;
+};
+
+struct RadixTraits {
+  static const int nBytes = 12;
+  static const int kRadixBits = 8;
+  static const int kRadixThreshold = (1<<10)*4;
+  static const int kRadixMask = (1 << kRadixBits) - 1;
+  static const int kRadixBin = 1 << kRadixBits;
+
+  static const int64_t kMSB0 = int64_t(0x80) << ((sizeof(int64_t) - 1) * 8);
+  static const int32_t kMSB1 = int32_t(0x80) << ((sizeof(int32_t) - 1) * 8);
+  using ObLoadDatumRowP = ObLoadDatumRow *;
+
+  int kth_byte(const ObLoadDatumRowP &x, int k) {
+    int id;
+    if (k >= 4)
+      id=((x->value.id0 ^ kMSB0) >> ((k - 4) * kRadixBits)) & kRadixMask;
+    else
+      id = ((x->value.id1 ^ kMSB1) >> (k * kRadixBits)) & kRadixMask;
+    x->radix_id=id;
+    return id;
+  }
+
+  bool compare(const ObLoadDatumRowP &x, const ObLoadDatumRowP &y) {
+    return x->value < y->value;
+  }
 };
 
 class ObLoadDatumRowCompare {
@@ -190,7 +217,8 @@ private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
   ObLoadDatumRowCompare compare_;
-  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
+  RadixTraits traits_;
+  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare, RadixTraits> external_sort_;
   bool is_closed_;
   bool is_inited_;
 };

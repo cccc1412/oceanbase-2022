@@ -45,31 +45,65 @@ struct ObExternalSortConstant {
   static inline bool is_timeout(const int64_t expire_timestamp);
 };
 
-// template <typename T> void radix_sort(common::ObVector<T *> list, const int radix, int size) {
-//   auto begin = list.begin();
-//   auto end=list.end();
-//   common::ObVector<T *> t_list1[radix],t_list2[radix];
-//   auto &src = t_list1;
-//   auto &dst = t_list2;
-//   for (; begin != end; ++begin)
-//     (*src)[_parser(*begin, 0)].push_back(*begin);
-//   int pass = 1;
-//   while (1) {
-//     for (const auto &v : *src)
-//       for (const auto &i : v)
-//         (*dst)[_parser(i, pass)].push_back(i);
-//     if (++pass == _pass)
-//       break;
-//     std::swap(src, dst);
-//     for (auto &v : *dst)
-//       v.clear();
-//   }
-//   for (const auto &v : *dst)
-//     for (const auto &i : v) {
-//       *_begin = i;
-//       ++_begin;
-//     }
-// }
+struct radix_value{
+  int64_t id0;
+  int32_t id1;
+  radix_value():id0(0),id1(0) {}
+  bool operator<(const radix_value &other) const
+  {
+    if(id0<other.id0)
+      return true;
+    else if(id0==other.id0)
+      return id1<other.id1;
+    else
+      return false;
+  }
+};
+
+template <typename T, typename Trait, typename Compare>
+void radix_sort(common::ObVector<T *> &list, Trait trait, Compare compare) {
+
+  size_t size = list.size();
+  if (size < Trait::kRadixThreshold) {
+    std::sort(list.begin(), list.end(), compare);
+  } else {
+    common::ObVector<T *> t_list(NULL, common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER);
+    t_list.assign(list);
+    common::ObVector<T *> *prev_list = &list;
+    common::ObVector<T *> *current_list = &t_list;
+    for (size_t i = 0; i < Trait::nBytes; i++) {
+      int bucket[Trait::kRadixBin] = {0};
+      bool all_in_one = false;
+      for (size_t j = 0; j < size; j++) {
+        bucket[trait.kth_byte(current_list->at(j), i)]++;
+      }
+
+      for (size_t j = 0; j < Trait::kRadixBin; j++) {
+        if (bucket[j] == size) {
+          all_in_one = true;
+          break;
+        }
+      }
+
+      for (size_t j = 1; j < Trait::kRadixBin && !all_in_one; j++) {
+        bucket[j] += bucket[j - 1];
+        if (bucket[j] == size)
+          break;
+      }
+
+      for (int j = size - 1; j >= 0 && !all_in_one; j--) {
+        prev_list->at(--bucket[current_list->at(j)->radix_id]) =
+            current_list->at(j);
+      }
+
+      if (!all_in_one) {
+        std::swap(current_list, prev_list);
+      }
+    }
+    list.assign(*current_list);
+    t_list.reset();
+  }
+}
 
 int ObExternalSortConstant::get_io_timeout_ms(const int64_t expire_timestamp,
                                               int64_t &wait_time_ms) {
@@ -226,7 +260,7 @@ ObFragmentWriterV2<T>::ObFragmentWriterV2()
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
       macro_buffer_writer_(), has_sample_item_(false), sample_item_(),
       file_io_handle_(), fd_(-1), dir_id_(-1),
-      tenant_id_(common::OB_INVALID_ID), current_size_(0){}
+      tenant_id_(common::OB_INVALID_ID), current_size_(0) {}
 
 template <typename T> ObFragmentWriterV2<T>::~ObFragmentWriterV2() { reset(); }
 
@@ -358,7 +392,8 @@ template <typename T> int ObFragmentWriterV2<T>::flush_buffer() {
     if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handle_))) {
       STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
     } else {
-      macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, buf_);
+      macro_buffer_writer_.assign(ObExternalSortConstant::BUF_HEADER_LENGTH,
+                                  buf_size_, buf_);
     }
   }
   return ret;
@@ -541,9 +576,10 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
 template <typename T> ObFragmentReaderV2<T>::~ObFragmentReaderV2() { reset(); }
 
 template <typename T>
-int ObFragmentReaderV2<T>::init(
-    const int64_t fd, const int64_t dir_id, const int64_t expire_timestamp,
-    const uint64_t tenant_id, const T &sample_item, const int64_t buf_size) {
+int ObFragmentReaderV2<T>::init(const int64_t fd, const int64_t dir_id,
+                                const int64_t expire_timestamp,
+                                const uint64_t tenant_id, const T &sample_item,
+                                const int64_t buf_size) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(is_inited_)) {
     ret = common::OB_INIT_TWICE;
@@ -1403,7 +1439,7 @@ public:
         pop_index(0), push_alloc_id(0), pop_alloc_id(0),
         buf_mem_limit(mem_limit), push_sleep_time(push_sleep),
         pop_sleep_time(push_sleep){};
-  ~DispatchQueue(){ reset();};
+  ~DispatchQueue() { reset(); };
 
   void init(common::ObArenaAllocator *allocator0,
             common::ObArenaAllocator *allocator1) {
@@ -1426,13 +1462,14 @@ public:
     if (OB_ISNULL(buf = static_cast<char *>(alloc(alloc_size)))) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to allocate memory", K(ret), K(alloc_size));
-    } else if (OB_ISNULL(new_item = new (buf+1) T())) {
+    } else if (OB_ISNULL(new_item = new (buf + 1) T())) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to placement new item", K(ret));
-    } else if (OB_FAIL(new_item->deep_copy(*item, buf+1, item_size, buf_pos))) {
+    } else if (OB_FAIL(
+                   new_item->deep_copy(*item, buf + 1, item_size, buf_pos))) {
       STORAGE_LOG(WARN, "fail to deep copy item", K(ret));
     } else {
-      buf[0]=1;
+      buf[0] = 1;
     }
 
     return ret;
@@ -1443,9 +1480,9 @@ public:
       usleep(pop_sleep_time);
     if (pop_size < push_size) {
       char *buf = (char *)dispatch_data_[pop_alloc_id].at(pop_index);
-      while (buf[0]==0)
+      while (buf[0] == 0)
         usleep(pop_sleep_time);
-      item = (T *)(buf+1);
+      item = (T *)(buf + 1);
       const int64_t alloc_size = 1 + sizeof(T) + item->get_deep_copy_size();
       pop_index++;
       pop_size += alloc_size;
@@ -1497,7 +1534,7 @@ protected:
   // 同时会将分配成功的 buf 放入对应的 dispatch_data_[push_alloc_id]
   // 之后其他各个线程在无锁的情况下对相应的 buf 进行初始化
   // 注意，pop_item 可能会取出未初始化的 buf 的情况
-  void* alloc(int64_t size) {
+  void *alloc(int64_t size) {
     LockGuard guard(lock);
     char *buf = NULL;
     if (size > buf_mem_limit) {
@@ -1510,8 +1547,8 @@ protected:
       if (OB_ISNULL(buf)) {
         STORAGE_LOG(WARN, "fail to alloc memory", K(size), K(buf_mem_limit));
       } else {
-        buf[0]=0;
-        dispatch_data_[push_alloc_id].push_back((T*)buf);
+        buf[0] = 0;
+        dispatch_data_[push_alloc_id].push_back((T *)buf);
         push_used += size;
         wait_switch_push();
         push_size = push_used;
@@ -1609,13 +1646,15 @@ int ObMemoryFragmentIterator<T>::get_next_item(const T *&item) {
   return ret;
 }
 
-template <typename T, typename Compare> class ObMemorySortRound {
+template <typename T, typename Compare, typename Trait = void>
+class ObMemorySortRound {
 public:
   typedef ObExternalSortRound<T, Compare> ExternalSortRound;
   ObMemorySortRound();
   virtual ~ObMemorySortRound();
   int init(const int64_t mem_limit, const int64_t expire_timestamp,
-           Compare *compare, ExternalSortRound *next_round);
+           Compare *compare, ExternalSortRound *next_round,
+           Trait *trait = NULL);
   int add_item(const T &item);
   int add_item_reuse(const T &item);
   int build_fragment();
@@ -1648,27 +1687,29 @@ private:
   common::ObArenaAllocator allocator_;
   common::ObVector<T *> item_list_;
   Compare *compare_;
+  Trait *trait_;
   ObMemoryFragmentIterator<T> *iter_;
   DispatchQueue<T> *dispatch_queue_;
 };
 
-template <typename T, typename Compare>
-ObMemorySortRound<T, Compare>::ObMemorySortRound()
+template <typename T, typename Compare, typename Trait>
+ObMemorySortRound<T, Compare, Trait>::ObMemorySortRound()
     : is_inited_(false), is_in_memory_(false), has_data_(false),
       buf_mem_limit_(0), expire_timestamp_(0), next_round_(NULL),
       allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
       item_list_(NULL, common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER),
-      compare_(NULL), iter_(NULL) {}
+      compare_(NULL), trait_(NULL), iter_(NULL) {}
 
-template <typename T, typename Compare>
-ObMemorySortRound<T, Compare>::~ObMemorySortRound() {}
+template <typename T, typename Compare, typename Trait>
+ObMemorySortRound<T, Compare, Trait>::~ObMemorySortRound() {}
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::init(const int64_t mem_limit,
-                                        const int64_t expire_timestamp,
-                                        Compare *compare,
-                                        ExternalSortRound *next_round) {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::init(const int64_t mem_limit,
+                                               const int64_t expire_timestamp,
+                                               Compare *compare,
+                                               ExternalSortRound *next_round,
+                                               Trait *trait) {
   int ret = common::OB_SUCCESS;
   allocator_.set_tenant_id(MTL_ID());
   if (OB_UNLIKELY(is_inited_)) {
@@ -1687,14 +1728,15 @@ int ObMemorySortRound<T, Compare>::init(const int64_t mem_limit,
     buf_mem_limit_ = mem_limit;
     expire_timestamp_ = expire_timestamp;
     compare_ = compare;
+    trait_ = trait;
     next_round_ = next_round;
     iter_ = NULL;
   }
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::add_item(const T &item) {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::add_item(const T &item) {
   int ret = common::OB_SUCCESS;
   const int64_t item_size = sizeof(T) + item.get_deep_copy_size();
   char *buf = NULL;
@@ -1732,8 +1774,8 @@ int ObMemorySortRound<T, Compare>::add_item(const T &item) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::add_item_reuse(const T &item) {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::add_item_reuse(const T &item) {
   int ret = common::OB_SUCCESS;
   const int64_t item_size = sizeof(T) + item.get_deep_copy_size();
   if (OB_UNLIKELY(!is_inited_)) {
@@ -1754,8 +1796,8 @@ int ObMemorySortRound<T, Compare>::add_item_reuse(const T &item) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::build_fragment() {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::build_fragment() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -1793,15 +1835,16 @@ int ObMemorySortRound<T, Compare>::build_fragment() {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::build_fragment_reuse() {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::build_fragment_reuse() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObMemorySortRound has not been inited", K(ret));
   } else if (item_list_.size() > 0) {
     int64_t start = common::ObTimeUtility::current_time();
-    std::sort(item_list_.begin(), item_list_.end(), *compare_);
+    // std::sort(item_list_.begin(), item_list_.end(), *compare_);
+    radix_sort(item_list_, *trait_, *compare_);
     if (OB_FAIL(compare_->result_code_)) {
       ret = compare_->result_code_;
     } else {
@@ -1832,8 +1875,8 @@ int ObMemorySortRound<T, Compare>::build_fragment_reuse() {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::build_fragment_nosort() {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::build_fragment_nosort() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -1861,8 +1904,8 @@ int ObMemorySortRound<T, Compare>::build_fragment_nosort() {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::finish() {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::finish() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -1891,8 +1934,8 @@ int ObMemorySortRound<T, Compare>::finish() {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::finish_reuse() {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::finish_reuse() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -1900,7 +1943,8 @@ int ObMemorySortRound<T, Compare>::finish_reuse() {
   } else if (0 == item_list_.size()) {
     has_data_ = false;
   } else {
-    std::sort(item_list_.begin(), item_list_.end(), *compare_);
+    // std::sort(item_list_.begin(), item_list_.end(), *compare_);
+    radix_sort(item_list_, *trait_, *compare_);
     if (OB_FAIL(compare_->result_code_)) {
       STORAGE_LOG(WARN, "fail to sort item list", K(ret));
     } else if (OB_FAIL(build_iterator())) {
@@ -1915,8 +1959,8 @@ int ObMemorySortRound<T, Compare>::finish_reuse() {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::build_iterator() {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::build_iterator() {
   int ret = common::OB_SUCCESS;
   void *buf = NULL;
   if (OB_UNLIKELY(!is_inited_)) {
@@ -1936,8 +1980,8 @@ int ObMemorySortRound<T, Compare>::build_iterator() {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::get_next_item(const T *&item) {
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::get_next_item(const T *&item) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -1960,8 +2004,8 @@ int ObMemorySortRound<T, Compare>::get_next_item(const T *&item) {
   return ret;
 }
 
-template <typename T, typename Compare>
-void ObMemorySortRound<T, Compare>::reset() {
+template <typename T, typename Compare, typename Trait>
+void ObMemorySortRound<T, Compare, Trait>::reset() {
   is_inited_ = false;
   is_in_memory_ = false;
   buf_mem_limit_ = 0;
@@ -1973,8 +2017,8 @@ void ObMemorySortRound<T, Compare>::reset() {
   iter_ = NULL;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::transfer_sorted_fragment_iter(
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::transfer_sorted_fragment_iter(
     ExternalSortRound &dest_round) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
@@ -1991,8 +2035,8 @@ int ObMemorySortRound<T, Compare>::transfer_sorted_fragment_iter(
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObMemorySortRound<T, Compare>::transfer_final_sorted_fragment_iter(
+template <typename T, typename Compare, typename Trait>
+int ObMemorySortRound<T, Compare, Trait>::transfer_final_sorted_fragment_iter(
     ExternalSortRound &dest_round) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
@@ -2011,15 +2055,16 @@ int ObMemorySortRound<T, Compare>::transfer_final_sorted_fragment_iter(
   return ret;
 }
 
-template <typename T, typename Compare> class ObExternalSort {
+template <typename T, typename Compare, typename Trait = void>
+class ObExternalSort {
 public:
-  typedef ObMemorySortRound<T, Compare> MemorySortRound;
+  typedef ObMemorySortRound<T, Compare, Trait> MemorySortRound;
   typedef ObExternalSortRound<T, Compare> ExternalSortRound;
   ObExternalSort();
   virtual ~ObExternalSort();
   int init(const int64_t mem_limit, const int64_t file_buf_size,
            const int64_t expire_timestamp, const uint64_t tenant_id,
-           Compare *compare);
+           Compare *compare, Trait *trait = nullptr);
   int add_item(const T &item);
   int add_item_reuse(const T &item);
   int do_sort(const bool final_merge);
@@ -2027,9 +2072,10 @@ public:
   int get_next_item(const T *&item);
   void clean_up();
   int add_fragment_iter(ObFragmentIterator<T> *iter);
-  int transfer_sorted_fragment_iter(ObExternalSort<T, Compare> &merge_sorter);
+  int transfer_sorted_fragment_iter(
+      ObExternalSort<T, Compare, Trait> &merge_sorter);
   int transfer_final_sorted_fragment_iter(
-      ObExternalSort<T, Compare> &merge_sorter);
+      ObExternalSort<T, Compare, Trait> &merge_sorter);
   int get_current_round(ExternalSortRound *&round);
   void set_dispatch_queue(DispatchQueue<T> *dispatch_queue) {
     memory_sort_round_.set_dispatch_queue(dispatch_queue);
@@ -2046,6 +2092,7 @@ private:
   int64_t expire_timestamp_;
   int64_t merge_count_per_round_;
   Compare *compare_;
+  Trait *trait_;
   MemorySortRound memory_sort_round_;
   ExternalSortRound sort_rounds_[EXTERNAL_SORT_ROUND_CNT];
   ExternalSortRound *curr_round_;
@@ -2054,22 +2101,22 @@ private:
   uint64_t tenant_id_;
 };
 
-template <typename T, typename Compare>
-ObExternalSort<T, Compare>::ObExternalSort()
+template <typename T, typename Compare, typename Trait>
+ObExternalSort<T, Compare, Trait>::ObExternalSort()
     : is_inited_(false), file_buf_size_(0), buf_mem_limit_(0),
       expire_timestamp_(0), merge_count_per_round_(0), compare_(NULL),
       memory_sort_round_(), curr_round_(NULL), next_round_(NULL),
       is_empty_(true), tenant_id_(common::OB_INVALID_ID) {}
 
-template <typename T, typename Compare>
-ObExternalSort<T, Compare>::~ObExternalSort() {}
+template <typename T, typename Compare, typename Trait>
+ObExternalSort<T, Compare, Trait>::~ObExternalSort() {}
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
-                                     const int64_t file_buf_size,
-                                     const int64_t expire_timestamp,
-                                     const uint64_t tenant_id,
-                                     Compare *compare) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::init(const int64_t mem_limit,
+                                            const int64_t file_buf_size,
+                                            const int64_t expire_timestamp,
+                                            const uint64_t tenant_id,
+                                            Compare *compare, Trait *trait) {
   int ret = common::OB_SUCCESS;
   int64_t macro_block_size = OB_SERVER_BLOCK_MGR.get_macro_block_size();
   if (OB_UNLIKELY(is_inited_)) {
@@ -2088,6 +2135,7 @@ int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
     expire_timestamp_ = expire_timestamp;
     merge_count_per_round_ = buf_mem_limit_ / file_buf_size_ / 2;
     compare_ = compare;
+    trait_ = trait;
     tenant_id_ = tenant_id;
     curr_round_ = &sort_rounds_[0];
     next_round_ = &sort_rounds_[1];
@@ -2112,8 +2160,8 @@ int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::add_item(const T &item) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::add_item(const T &item) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -2124,8 +2172,8 @@ int ObExternalSort<T, Compare>::add_item(const T &item) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::add_item_reuse(const T &item) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::add_item_reuse(const T &item) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -2136,8 +2184,8 @@ int ObExternalSort<T, Compare>::add_item_reuse(const T &item) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::do_sort(const bool final_merge) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::do_sort(const bool final_merge) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -2188,8 +2236,8 @@ int ObExternalSort<T, Compare>::do_sort(const bool final_merge) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::do_sort_reuse(const bool final_merge) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::do_sort_reuse(const bool final_merge) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -2236,8 +2284,8 @@ int ObExternalSort<T, Compare>::do_sort_reuse(const bool final_merge) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::get_next_item(const T *&item) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::get_next_item(const T *&item) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -2259,8 +2307,8 @@ int ObExternalSort<T, Compare>::get_next_item(const T *&item) {
   return ret;
 }
 
-template <typename T, typename Compare>
-void ObExternalSort<T, Compare>::clean_up() {
+template <typename T, typename Compare, typename Trait>
+void ObExternalSort<T, Compare, Trait>::clean_up() {
   int tmp_ret = common::OB_SUCCESS;
   is_inited_ = false;
   file_buf_size_ = 0;
@@ -2282,8 +2330,9 @@ void ObExternalSort<T, Compare>::clean_up() {
   }
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::add_fragment_iter(ObFragmentIterator<T> *iter) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::add_fragment_iter(
+    ObFragmentIterator<T> *iter) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
@@ -2296,8 +2345,8 @@ int ObExternalSort<T, Compare>::add_fragment_iter(ObFragmentIterator<T> *iter) {
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::get_current_round(
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::get_current_round(
     ExternalSortRound *&curr_round) {
   int ret = common::OB_SUCCESS;
   curr_round = NULL;
@@ -2313,9 +2362,9 @@ int ObExternalSort<T, Compare>::get_current_round(
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::transfer_sorted_fragment_iter(
-    ObExternalSort<T, Compare> &merge_sorter) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::transfer_sorted_fragment_iter(
+    ObExternalSort<T, Compare, Trait> &merge_sorter) {
   int ret = common::OB_SUCCESS;
   ExternalSortRound *curr_round = NULL;
   if (OB_UNLIKELY(!is_inited_)) {
@@ -2344,9 +2393,9 @@ int ObExternalSort<T, Compare>::transfer_sorted_fragment_iter(
   return ret;
 }
 
-template <typename T, typename Compare>
-int ObExternalSort<T, Compare>::transfer_final_sorted_fragment_iter(
-    ObExternalSort<T, Compare> &merge_sorter) {
+template <typename T, typename Compare, typename Trait>
+int ObExternalSort<T, Compare, Trait>::transfer_final_sorted_fragment_iter(
+    ObExternalSort<T, Compare, Trait> &merge_sorter) {
   int ret = common::OB_SUCCESS;
   ExternalSortRound *curr_round = NULL;
   if (OB_UNLIKELY(!is_inited_)) {

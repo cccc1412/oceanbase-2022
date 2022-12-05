@@ -273,7 +273,7 @@ int ObLoadCSVPaser::get_next_row(ObLoadDataBuffer &buffer,
  */
 
 ObLoadDatumRow::ObLoadDatumRow()
-    : radix_value(0), allocator_(ObModIds::OB_SQL_LOAD_DATA), capacity_(0),
+    : allocator_(ObModIds::OB_SQL_LOAD_DATA), capacity_(0),
       count_(0), datums_(nullptr) {}
 
 ObLoadDatumRow::~ObLoadDatumRow() {}
@@ -333,7 +333,7 @@ int ObLoadDatumRow::deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
       }
     }
     if (OB_SUCC(ret)) {
-      radix_value=src.radix_value;
+      value=src.value;
       capacity_ = datum_cnt;
       count_ = datum_cnt;
       datums_ = datums;
@@ -361,6 +361,8 @@ DEF_TO_STRING(ObLoadDatumRow) {
 
 OB_DEF_SERIALIZE(ObLoadDatumRow) {
   int ret = OB_SUCCESS;
+  OB_UNIS_ENCODE(value.id0);
+  OB_UNIS_ENCODE(value.id1);
   OB_UNIS_ENCODE_ARRAY(datums_, count_);
   return ret;
 }
@@ -368,6 +370,10 @@ OB_DEF_SERIALIZE(ObLoadDatumRow) {
 OB_DEF_DESERIALIZE(ObLoadDatumRow) {
   int ret = OB_SUCCESS;
   int64_t count = 0;
+  int64_t id0 = 0;
+  int64_t id1 = 0;
+  OB_UNIS_DECODE(id0);
+  OB_UNIS_DECODE(id1);
   OB_UNIS_DECODE(count);
   if (OB_SUCC(ret)) {
     if (OB_UNLIKELY(count <= 0)) {
@@ -378,16 +384,17 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
     } else {
       OB_UNIS_DECODE_ARRAY(datums_, count);
       count_ = count;
+      value.id0=id0;
+      value.id1=id1;
     }
   }
-  int64_t id0 = datums_[0].get_int();
-  int64_t id1 = datums_[1].get_int();
-  radix_value = (id0 * 100) + id1;
   return ret;
 }
 
 OB_DEF_SERIALIZE_SIZE(ObLoadDatumRow) {
   int64_t len = 0;
+  OB_UNIS_ADD_LEN(value.id0);
+  OB_UNIS_ADD_LEN(value.id1);
   OB_UNIS_ADD_LEN_ARRAY(datums_, count_);
   return len;
 }
@@ -421,7 +428,7 @@ int ObLoadDatumRowCompare::init(int64_t rowkey_column_num,
 
 bool ObLoadDatumRowCompare::operator()(const ObLoadDatumRow *lhs,
                                        const ObLoadDatumRow *rhs) {
-  return lhs->radix_value<rhs->radix_value;
+  return lhs->value<rhs->value;
 }
 
 /**
@@ -538,9 +545,8 @@ int ObLoadRowCaster::get_casted_row(const ObNewRow &new_row,
       }
     }
     if (OB_SUCC(ret)) {
-      int64_t id0 = datum_row_.datums_[0].get_int();
-      int64_t id1 = datum_row_.datums_[1].get_int();
-      datum_row_.radix_value=(id0*100)+id1;
+      datum_row_.value.id0 = datum_row_.datums_[0].get_int();
+      datum_row_.value.id1 = datum_row_.datums_[1].get_int32();
       datum_row = &datum_row_;
     }
   }

@@ -941,6 +941,7 @@ void ObLoadDispatcher::error_close(int idx) {
     is_finished_ = true;
     for (int i = 0; i < dispatch_num_; i++) {
       dispatch_queue_[i]->finish();
+      dispatch_queue_[i]->reset();
     }
   }
 }

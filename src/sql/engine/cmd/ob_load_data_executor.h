@@ -22,8 +22,8 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t PROCESS_THREAD_NUM = 6;
-  static const int64_t LOAD_THREAD_NUM = 11;
+  static const int64_t PROCESS_THREAD_NUM = 2;
+  static const int64_t LOAD_THREAD_NUM = 3;
   static const int64_t SORT_QUEUE_BUFFER_SIZE = (1LL<<20)*128LL;
   static const int64_t SORT_QUEUE_SLEEP_TIME = 200000;
 public:

@@ -80,8 +80,8 @@ void radix_sort(common::ObVector<T *> &list, Trait trait, Compare compare) {
         max.id1 = v->value.id1;
     }
     trait.min = min;
-    uint64_t max_id0 = min.id0 > 0 ? max.id0 : max.id0 - min.id0;
-    uint64_t max_id1 = min.id1 > 0 ? max.id1 : max.id1 - min.id1;
+    uint64_t max_id0 = min.id0 >= 0 ? max.id0 : max.id0 - min.id0;
+    uint32_t max_id1 = min.id1 >= 0 ? max.id1 : max.id1 - min.id1;
     int id0_round = 0;
     int id1_round = 0;
     while (max_id0 > 0) {

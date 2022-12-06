@@ -22,7 +22,7 @@ static const int64_t MAX_RECORD_SIZE = (1LL << 12);          // 4K
 static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 512LL;  // 540M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);         // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);             // 1M
-static const int64_t BUFFER_NUM = (3LL << 20) + (6LL << 19); // 4M
+static const int64_t BUFFER_NUM = (3LL << 20) + (2LL << 19); // 4M
 
 static const uint64_t SLEEP_TIME = 300000;
 
@@ -131,17 +131,30 @@ struct RadixTraits {
   static const int32_t kMSB1 = int32_t(0x80) << ((sizeof(int32_t) - 1) * 8);
   using ObLoadDatumRowP = ObLoadDatumRow *;
 
-  int kth_byte(const ObLoadDatumRowP &x, int k) {
+  radix_value min;
+
+  inline int kth_byte(ObLoadDatumRowP &x, int k) {
     int id;
-    if (k >= 4)
-      id=((x->value.id0 ^ kMSB0) >> ((k - 4) * kRadixBits)) & kRadixMask;
-    else
-      id = ((x->value.id1 ^ kMSB1) >> (k * kRadixBits)) & kRadixMask;
+    if (k >= 4) {
+      if (min.id0 >= 0) {
+        id = (x->value.id0 >> ((k - 4) * kRadixBits)) & kRadixMask;
+      } else {
+        uint64_t t_value = x->value.id0 - min.id0;
+        id = (t_value >> ((k - 4) * kRadixBits)) & kRadixMask;
+      }
+    } else {
+      if (min.id1 >= 0) {
+        id = (x->value.id1 >> (k * kRadixBits)) & kRadixMask;
+      } else {
+        uint32_t t_value = x->value.id1 - min.id1;
+        id = (t_value >> (k * kRadixBits)) & kRadixMask;
+      }
+    }
     x->radix_id=id;
     return id;
   }
 
-  bool compare(const ObLoadDatumRowP &x, const ObLoadDatumRowP &y) {
+  inline bool compare(const ObLoadDatumRowP &x, const ObLoadDatumRowP &y) {
     return x->value < y->value;
   }
 };

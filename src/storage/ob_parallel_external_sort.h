@@ -45,16 +45,15 @@ struct ObExternalSortConstant {
   static inline bool is_timeout(const int64_t expire_timestamp);
 };
 
-struct radix_value{
+struct radix_value {
   int64_t id0;
   int32_t id1;
-  radix_value():id0(0),id1(0) {}
-  bool operator<(const radix_value &other) const
-  {
-    if(id0<other.id0)
+  radix_value() : id0(0), id1(0) {}
+  bool operator<(const radix_value &other) const {
+    if (id0 < other.id0)
       return true;
-    else if(id0==other.id0)
-      return id1<other.id1;
+    else if (id0 == other.id0)
+      return id1 < other.id1;
     else
       return false;
   }
@@ -67,41 +66,76 @@ void radix_sort(common::ObVector<T *> &list, Trait trait, Compare compare) {
   if (size < Trait::kRadixThreshold) {
     std::sort(list.begin(), list.end(), compare);
   } else {
-    common::ObVector<T *> t_list(NULL, common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER);
-    t_list.assign(list);
-    common::ObVector<T *> *prev_list = &list;
-    common::ObVector<T *> *current_list = &t_list;
-    for (size_t i = 0; i < Trait::nBytes; i++) {
-      int bucket[Trait::kRadixBin] = {0};
-      bool all_in_one = false;
-      for (size_t j = 0; j < size; j++) {
-        bucket[trait.kth_byte(current_list->at(j), i)]++;
-      }
+    radix_value min = list.at(0)->value;
+    radix_value max = list.at(0)->value;
+    for (size_t i = 1; i < size; i++) {
+      T *v = list.at(i);
+      if (v->value.id0 < min.id0)
+        min.id0 = v->value.id0;
+      if (v->value.id1 < min.id1)
+        min.id1 = v->value.id1;
+      if (v->value.id0 > max.id0)
+        max.id0 = v->value.id0;
+      if (v->value.id1 > max.id1)
+        max.id1 = v->value.id1;
+    }
+    trait.min = min;
+    uint64_t max_id0 = min.id0 > 0 ? max.id0 : max.id0 - min.id0;
+    uint64_t max_id1 = min.id1 > 0 ? max.id1 : max.id1 - min.id1;
+    int id0_round = 0;
+    int id1_round = 0;
+    while (max_id0 > 0) {
+      max_id0=max_id0 >> Trait::kRadixBits;
+      id0_round++;
+    }
+    while (max_id1 > 0) {
+      max_id1=max_id1 >> Trait::kRadixBits;
+      id1_round++;
+    }
+    // 如果数据跨度范围比较大，那么进行快排
+    if (id0_round + id1_round > Trait::nBytes / 2)
+      std::sort(list.begin(), list.end(), compare);
+    else {
+      common::ObVector<T *> t_list(NULL, common::ObNewModIds::OB_SQL_LOAD_DATA);
+      t_list.assign(list);
+      common::ObVector<T *> *prev_list = &list;
+      common::ObVector<T *> *current_list = &t_list;
+      for (size_t i = 0; i < Trait::nBytes; i++) {
+        if (i < 4 && i >= id1_round)
+          continue;
+        if (i >= 4 && (i - 4) >= id0_round)
+          continue;
+        int bucket[Trait::kRadixBin] = {0};
+        bool all_in_one = false;
+        for (size_t j = 0; j < size; j++) {
+          bucket[trait.kth_byte(current_list->at(j), i)]++;
+        }
 
-      for (size_t j = 0; j < Trait::kRadixBin; j++) {
-        if (bucket[j] == size) {
-          all_in_one = true;
-          break;
+        for (size_t j = 0; j < Trait::kRadixBin; j++) {
+          if (bucket[j] == size) {
+            all_in_one = true;
+            break;
+          }
+        }
+
+        // 本轮全部在一个桶内，则不需要重新分派
+        if (!all_in_one) {
+          for (size_t j = 1; j < Trait::kRadixBin; j++) {
+            bucket[j] += bucket[j - 1];
+            if (bucket[j] == size)
+              break;
+          }
+
+          for (int j = size - 1; j >= 0; j--) {
+            prev_list->at(--bucket[current_list->at(j)->radix_id]) =
+                current_list->at(j);
+          }
+          std::swap(current_list, prev_list);
         }
       }
-
-      for (size_t j = 1; j < Trait::kRadixBin && !all_in_one; j++) {
-        bucket[j] += bucket[j - 1];
-        if (bucket[j] == size)
-          break;
-      }
-
-      for (int j = size - 1; j >= 0 && !all_in_one; j--) {
-        prev_list->at(--bucket[current_list->at(j)->radix_id]) =
-            current_list->at(j);
-      }
-
-      if (!all_in_one) {
-        std::swap(current_list, prev_list);
-      }
+      list.assign(*current_list);
+      t_list.reset();
     }
-    list.assign(*current_list);
-    t_list.reset();
   }
 }
 
@@ -1654,7 +1688,7 @@ public:
   virtual ~ObMemorySortRound();
   int init(const int64_t mem_limit, const int64_t expire_timestamp,
            Compare *compare, ExternalSortRound *next_round,
-           Trait *trait = NULL);
+           Trait *trait = nullptr);
   int add_item(const T &item);
   int add_item_reuse(const T &item);
   int build_fragment();
@@ -2104,9 +2138,9 @@ private:
 template <typename T, typename Compare, typename Trait>
 ObExternalSort<T, Compare, Trait>::ObExternalSort()
     : is_inited_(false), file_buf_size_(0), buf_mem_limit_(0),
-      expire_timestamp_(0), merge_count_per_round_(0), compare_(NULL),
-      memory_sort_round_(), curr_round_(NULL), next_round_(NULL),
-      is_empty_(true), tenant_id_(common::OB_INVALID_ID) {}
+      expire_timestamp_(0), merge_count_per_round_(0),
+      compare_(NULL), trait_(NULL), memory_sort_round_(), curr_round_(NULL),
+      next_round_(NULL), is_empty_(true), tenant_id_(common::OB_INVALID_ID) {}
 
 template <typename T, typename Compare, typename Trait>
 ObExternalSort<T, Compare, Trait>::~ObExternalSort() {}
@@ -2151,7 +2185,7 @@ int ObExternalSort<T, Compare, Trait>::init(const int64_t mem_limit,
                                          compare_))) {
       STORAGE_LOG(WARN, "fail to init current sort round", K(ret));
     } else if (OB_FAIL(memory_sort_round_.init(buf_mem_limit_, expire_timestamp,
-                                               compare_, curr_round_))) {
+                                               compare_, curr_round_, trait_))) {
       STORAGE_LOG(WARN, "fail to init memory sort round", K(ret));
     } else {
       is_inited_ = true;

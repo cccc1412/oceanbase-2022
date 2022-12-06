@@ -1004,7 +1004,7 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema,
     } else if (OB_FAIL(compare_.init(rowkey_column_num, &datum_utils_))) {
       LOG_WARN("fail to init compare", KR(ret));
     } else if (OB_FAIL(external_sort_.init(mem_size, file_buf_size, 0, MTL_ID(),
-                                           &compare_))) {
+                                           &compare_, &traits_))) {
       LOG_WARN("fail to init external sort", KR(ret));
     } else {
       is_inited_ = true;
@@ -1629,6 +1629,7 @@ int ObLoadDataDirectDemo::do_load1() {
         break;
       }
     } else if (OB_FAIL(sort_queue_->push_item(datum_row))) {
+      sort_queue_->finish();
       LOG_WARN("fail to append row", KR(ret));
     }
   }

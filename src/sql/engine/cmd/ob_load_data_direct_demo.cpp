@@ -361,19 +361,19 @@ DEF_TO_STRING(ObLoadDatumRow) {
 
 OB_DEF_SERIALIZE(ObLoadDatumRow) {
   int ret = OB_SUCCESS;
-  OB_UNIS_ENCODE(value.id0);
-  OB_UNIS_ENCODE(value.id1);
+  // OB_UNIS_ENCODE(value.id0);
+  // OB_UNIS_ENCODE(value.id1);
   OB_UNIS_ENCODE_ARRAY(datums_, count_);
   return ret;
 }
 
 OB_DEF_DESERIALIZE(ObLoadDatumRow) {
   int ret = OB_SUCCESS;
+  // int64_t id0 = 0;
+  // int32_t id1 = 0;
   int64_t count = 0;
-  int64_t id0 = 0;
-  int64_t id1 = 0;
-  OB_UNIS_DECODE(id0);
-  OB_UNIS_DECODE(id1);
+  // OB_UNIS_DECODE(id0);
+  // OB_UNIS_DECODE(id1);
   OB_UNIS_DECODE(count);
   if (OB_SUCC(ret)) {
     if (OB_UNLIKELY(count <= 0)) {
@@ -384,8 +384,8 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
     } else {
       OB_UNIS_DECODE_ARRAY(datums_, count);
       count_ = count;
-      value.id0=id0;
-      value.id1=id1;
+      value.id0=datums_[0].get_int();
+      value.id1=datums_[1].get_int32();
     }
   }
   return ret;
@@ -393,8 +393,8 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
 
 OB_DEF_SERIALIZE_SIZE(ObLoadDatumRow) {
   int64_t len = 0;
-  OB_UNIS_ADD_LEN(value.id0);
-  OB_UNIS_ADD_LEN(value.id1);
+  // OB_UNIS_ADD_LEN(value.id0);
+  // OB_UNIS_ADD_LEN(value.id1);
   OB_UNIS_ADD_LEN_ARRAY(datums_, count_);
   return len;
 }
@@ -1624,15 +1624,15 @@ int ObLoadDataDirectDemo::do_load1() {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
       } else {
-        sort_queue_->finish();
         ret = OB_SUCCESS;
         break;
       }
     } else if (OB_FAIL(sort_queue_->push_item(datum_row))) {
-      sort_queue_->finish();
       LOG_WARN("fail to append row", KR(ret));
     }
   }
+
+  sort_queue_->finish();
 
   return ret;
 }
@@ -1665,10 +1665,10 @@ int ObLoadDataDirectDemo::do_load2() {
   if (OB_SUCC(ret)) {
     if (OB_FAIL(sstable_writer_->close())) {
       LOG_WARN("fail to close sstable writer", KR(ret));
-    } else {
-      sort_queue_->reset();
     }
   }
+
+  sort_queue_->reset();
 
   end = clock();
   t = (end - start) / CLOCKS_PER_SEC;

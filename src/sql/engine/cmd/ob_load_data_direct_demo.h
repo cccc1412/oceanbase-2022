@@ -19,7 +19,7 @@ namespace oceanbase {
 namespace sql {
 
 static const int64_t MAX_RECORD_SIZE = (1LL << 12);          // 4K
-static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 512LL;  // 540M
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 256LL;  // 540M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);         // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);             // 1M
 static const int64_t BUFFER_NUM = (2LL << 20); // + (640LL << 10) 4M
@@ -127,8 +127,8 @@ struct RadixTraits {
   static const int kRadixMask = (1 << kRadixBits) - 1;
   static const int kRadixBin = 1 << kRadixBits;
 
-  static const int64_t kMSB0 = int64_t(0x80) << ((sizeof(int64_t) - 1) * 8);
-  static const int32_t kMSB1 = int32_t(0x80) << ((sizeof(int32_t) - 1) * 8);
+  // static const int64_t kMSB0 = int64_t(0x80) << ((sizeof(int64_t) - 1) * 8);
+  // static const int32_t kMSB1 = int32_t(0x80) << ((sizeof(int32_t) - 1) * 8);
   using ObLoadDatumRowP = ObLoadDatumRow *;
 
   radix_value min;

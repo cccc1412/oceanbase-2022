@@ -44,7 +44,7 @@ struct ObExternalSortConstant {
   static const int64_t DEFAULT_FILE_READ_WRITE_BUFFER = 2 * 1024 * 1024LL; // 2m
   static const int64_t MIN_MULTIPLE_MERGE_COUNT = 2;
   static const int64_t DECOMPRESS_BUFFER_SIZE = 4*1024LL*1024LL;
-  static const int64_t MAX_SERIALIZE_SIZE = 500;
+  static const int64_t MAX_SERIALIZE_SIZE = 300;
   static inline int get_io_timeout_ms(const int64_t expire_timestamp,
                                       int64_t &wait_time_ms);
   static inline bool is_timeout(const int64_t expire_timestamp);

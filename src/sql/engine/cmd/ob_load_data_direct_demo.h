@@ -188,6 +188,7 @@ public:
 private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
+  // ObArray<ObColDesc> col_descs_;
   ObLoadDatumRowCompare compare_;
   sql::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
   bool is_closed_;

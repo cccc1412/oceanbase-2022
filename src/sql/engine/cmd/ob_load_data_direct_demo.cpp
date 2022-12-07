@@ -1010,6 +1010,7 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema,
   } else {
     allocator_.set_tenant_id(MTL_ID());
     const int64_t rowkey_column_num = table_schema->get_rowkey_column_num();
+    const int64_t column_num = table_schema->get_column_count();
     ObArray<ObColDesc> multi_version_column_descs;
     if (OB_FAIL(table_schema->get_multi_version_column_descs(
             multi_version_column_descs))) {
@@ -1020,11 +1021,16 @@ int ObLoadExternalSort::init(const ObTableSchema *table_schema,
       LOG_WARN("fail to init datum utils", KR(ret));
     } else if (OB_FAIL(compare_.init(rowkey_column_num, &datum_utils_))) {
       LOG_WARN("fail to init compare", KR(ret));
-    } else if (OB_FAIL(external_sort_.init(mem_size, file_buf_size, 0, MTL_ID(),
-                                           &compare_))) {
-      LOG_WARN("fail to init external sort", KR(ret));
     } else {
-      is_inited_ = true;
+      multi_version_column_descs.remove(rowkey_column_num);
+      multi_version_column_descs.remove(rowkey_column_num + 1);
+      if (OB_FAIL(OB_FAIL(external_sort_.init(mem_size, file_buf_size, 0,
+                                              MTL_ID(), &compare_, column_num,
+                                              multi_version_column_descs)))) {
+        LOG_WARN("fail to init external sort", KR(ret));
+      } else {
+        is_inited_ = true;
+      }
     }
   }
   return ret;

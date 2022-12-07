@@ -236,7 +236,7 @@ class ObLoadDispatcher {
   typedef common::ObSpinLock Lock;
   typedef lib::ObLockGuard<Lock> LockGuard;
   typedef common::ObVector<ObLoadDatumRow *> LoadDatumRowVector;
-  typedef storage::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
+  typedef sql::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
 
 public:
   // thread_num 指的是向 ObLoadDispatcher 提供数据的线程数量

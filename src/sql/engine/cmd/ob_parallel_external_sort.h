@@ -10,12 +10,12 @@
  * Mulan PubL v2 for more details.
  */
 
-#ifndef OCEANBASE_SQL_OB_PARALLEL_EXTERNAL_SORT_H_
-#define OCEANBASE_SQL_OB_PARALLEL_EXTERNAL_SORT_H_
+#ifndef OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
+#define OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
 
-#include "blocksstable/ob_block_manager.h"
-#include "blocksstable/ob_block_sstable_struct.h"
-#include "blocksstable/ob_tmp_file.h"
+#include "storage/blocksstable/ob_block_manager.h"
+#include "storage/blocksstable/ob_block_sstable_struct.h"
+#include "storage/blocksstable/ob_tmp_file.h"
 #include "lib/compress/lz4/ob_lz4_compressor.h"
 #include "lib/container/ob_array.h"
 #include "lib/container/ob_heap.h"
@@ -155,7 +155,8 @@ template <typename T> int64_t ObMacroBufferWriter<T>::size() {
   return buf_pos_;
 }
 
-template <typename T> class ObFragmentWriterV2 {
+template <typename T, typename C = blocksstable::ObStorageDatum>
+class ObFragmentWriterV2 {
 public:
   ObFragmentWriterV2();
   virtual ~ObFragmentWriterV2();
@@ -180,7 +181,7 @@ private:
   common::ObArray<char *> compress_bufs_;
   int64_t buf_size_;
   int64_t compress_buf_size_;
-  ObMacroBufferWriter<T> *macro_buffer_writers_;
+  ObMacroBufferWriter<C> *macro_buffer_writers_;
   blocksstable::ObTmpFileIOHandle *file_io_handles_;
   int64_t *fds_;
   int64_t expire_timestamp_;
@@ -193,8 +194,8 @@ private:
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
 };
 
-template <typename T>
-ObFragmentWriterV2<T>::ObFragmentWriterV2()
+template <typename T, typename C>
+ObFragmentWriterV2<T,C>::ObFragmentWriterV2()
     : is_inited_(false), bufs_(), compress_bufs_(), buf_size_(0),
       compress_buf_size_(0), macro_buffer_writers_(NULL),
       file_io_handles_(NULL), fds_(NULL), expire_timestamp_(0),
@@ -203,10 +204,10 @@ ObFragmentWriterV2<T>::ObFragmentWriterV2()
       has_sample_item_(false), sample_item_(), dir_id_(-1),
       tenant_id_(common::OB_INVALID_ID), compressor_(){};
 
-template <typename T> ObFragmentWriterV2<T>::~ObFragmentWriterV2() { reset(); }
+template <typename T, typename C> ObFragmentWriterV2<T,C>::~ObFragmentWriterV2() { reset(); }
 
-template <typename T>
-int ObFragmentWriterV2<T>::open(const int64_t buf_size,
+template <typename T, typename C>
+int ObFragmentWriterV2<T,C>::open(const int64_t buf_size,
                                 const int64_t expire_timestamp,
                                 const uint64_t tenant_id, const int64_t dir_id,
                                 const int count) {
@@ -240,8 +241,8 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
       STORAGE_LOG(WARN, "fail to allocate buffer", K(ret), K(align_buf_size));
     } else if (OB_ISNULL(
                    macro_buffer_writers_ =
-                       static_cast<ObMacroBufferWriter<T> *>(allocator_.alloc(
-                           sizeof(ObMacroBufferWriter<T>) * count_)))) {
+                       static_cast<ObMacroBufferWriter<C> *>(allocator_.alloc(
+                           sizeof(ObMacroBufferWriter<C>) * count_)))) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
     } else if (OB_ISNULL(file_io_handles_ =
@@ -282,18 +283,20 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
   return ret;
 }
 
-template <typename T> int ObFragmentWriterV2<T>::write_item(const T &item) {
+template <typename T, typename C>
+int ObFragmentWriterV2<T,C>::write_item(const T &item) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObFragmentWriter has not been inited", K(ret));
   }
   for (int i = 0; i < count_ && OB_SUCC(ret); i++) {
-    if (OB_FAIL(macro_buffer_writers_[i]->write_item(item->datums_[i])) &&
+    if (OB_FAIL(macro_buffer_writers_[i].write_item(item.datums_[i])) &&
         common::OB_EAGAIN == ret) {
       if (OB_FAIL(flush_buffer(i))) {
         STORAGE_LOG(WARN, "switch next macro buffer failed", K(ret));
-      } else if (OB_FAIL(macro_buffer_writers_[i].write_item(item))) {
+      } else if (OB_FAIL(
+                     macro_buffer_writers_[i].write_item(item.datums_[i]))) {
         STORAGE_LOG(WARN, "fail to write item", K(ret));
       }
     } else {
@@ -319,19 +322,20 @@ template <typename T> int ObFragmentWriterV2<T>::write_item(const T &item) {
   return ret;
 }
 
-template <typename T>
-int ObFragmentWriterV2<T>::check_need_flush(bool &need_flush, int idx) {
+template <typename T, typename C>
+int ObFragmentWriterV2<T,C>::check_need_flush(bool &need_flush, int idx) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = common::OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObFragmentWriterV2 has not been inited", K(ret));
   } else {
-    need_flush = macro_buffer_writers_[idx]->has_item();
+    need_flush = macro_buffer_writers_[idx].has_item();
   }
   return ret;
 }
 
-template <typename T> int ObFragmentWriterV2<T>::flush_buffer(int idx) {
+template <typename T, typename C>
+int ObFragmentWriterV2<T,C>::flush_buffer(int idx) {
   int ret = common::OB_SUCCESS;
   int64_t timeout_ms = 0;
   int64_t compress_size = 0;
@@ -381,7 +385,8 @@ template <typename T> int ObFragmentWriterV2<T>::flush_buffer(int idx) {
   return ret;
 }
 
-template <typename T> int ObFragmentWriterV2<T>::sync() {
+template <typename T, typename C>
+int ObFragmentWriterV2<T,C>::sync() {
   int ret = common::OB_SUCCESS;
   if (is_inited_) {
     for (int i = 0; i < count_; i++) {
@@ -389,7 +394,7 @@ template <typename T> int ObFragmentWriterV2<T>::sync() {
       if (OB_FAIL(check_need_flush(need_flush, i))) {
         STORAGE_LOG(WARN, "fail to check need flush", K(ret));
       } else if (need_flush) {
-        if (OB_FAIL(flush_buffer())) {
+        if (OB_FAIL(flush_buffer(i))) {
           STORAGE_LOG(WARN, "fail to flush buffer", K(ret));
         }
       }
@@ -415,13 +420,14 @@ template <typename T> int ObFragmentWriterV2<T>::sync() {
   return ret;
 }
 
-template <typename T> void ObFragmentWriterV2<T>::reset() {
+template <typename T, typename C>
+void ObFragmentWriterV2<T,C>::reset() {
   is_inited_ = false;
   count_ = 0;
   bufs_.reset();
   compress_bufs_.reset();
   buf_size_ = 0;
-  compress_buf_size=0;
+  compress_buf_size_ = 0;
   macro_buffer_writers_ = NULL;
   file_io_handles_ = NULL;
   fds_ = NULL;
@@ -1047,7 +1053,7 @@ public:
   virtual ~ObExternalSortRound();
   int init(const int64_t merge_count, const int64_t file_buf_size,
            const int64_t expire_timestamp, const uint64_t tenant_id,
-           Compare *compare);
+           Compare *compare, const int count);
   bool is_inited() const { return is_inited_; }
   int add_item(const T &item);
   int build_fragment();
@@ -1070,6 +1076,7 @@ private:
   typedef ObFragmentWriterV2<T> FragmentWriter;
   typedef ObFragmentMerge<T, Compare> FragmentMerger;
   bool is_inited_;
+  int count_;
   int64_t merge_count_;
   int64_t file_buf_size_;
   FragmentIteratorList iters_;
@@ -1100,7 +1107,7 @@ int ObExternalSortRound<T, Compare>::init(const int64_t merge_count,
                                           const int64_t file_buf_size,
                                           const int64_t expire_timestamp,
                                           const uint64_t tenant_id,
-                                          Compare *compare) {
+                                          Compare *compare, const int count) {
   int ret = common::OB_SUCCESS;
   allocator_.set_tenant_id(MTL_ID());
   if (OB_UNLIKELY(is_inited_)) {
@@ -1116,6 +1123,7 @@ int ObExternalSortRound<T, Compare>::init(const int64_t merge_count,
     STORAGE_LOG(WARN, "fail to alloc dir", K(ret));
   } else {
     is_inited_ = true;
+    count_ = count;
     merge_count_ = merge_count;
     file_buf_size_ = file_buf_size;
     iters_.reset();
@@ -1140,7 +1148,7 @@ int ObExternalSortRound<T, Compare>::add_item(const T &item) {
                 K(expire_timestamp_));
   } else if (!is_writer_opened_ &&
              OB_FAIL(writer_.open(file_buf_size_, expire_timestamp_, tenant_id_,
-                                  dir_id_))) {
+                                  dir_id_, count_))) {
     STORAGE_LOG(WARN, "fail to open writer", K(ret), K_(tenant_id), K_(dir_id));
   } else {
     is_writer_opened_ = true;
@@ -1168,9 +1176,8 @@ int ObExternalSortRound<T, Compare>::build_fragment() {
   } else if (OB_FAIL(writer_.sync())) {
     STORAGE_LOG(WARN, "fail to sync macro file", K(ret));
   } else {
-    STORAGE_LOG(INFO, "build fragment", K(writer_.get_fd()),
-                K(writer_.get_sample_item()));
-    if (OB_FAIL(reader->init(writer_.get_fd(), writer_.get_dir_id(),
+    STORAGE_LOG(INFO, "build fragment", K(writer_.get_sample_item()));
+    if (OB_FAIL(reader->init(writer_.get_fd(0), writer_.get_dir_id(),
                              expire_timestamp_, tenant_id_,
                              writer_.get_sample_item(), file_buf_size_))) {
       STORAGE_LOG(WARN, "fail to open reader", K(ret), K(file_buf_size_),
@@ -1405,6 +1412,7 @@ int ObExternalSortRound<T, Compare>::clean_up() {
     ret = (common::OB_SUCCESS == ret) ? tmp_ret : ret;
   }
   is_inited_ = false;
+  count_ = 0;
   merge_count_ = 0;
   file_buf_size_ = 0;
   iters_.reset();
@@ -2043,7 +2051,7 @@ public:
   virtual ~ObExternalSort();
   int init(const int64_t mem_limit, const int64_t file_buf_size,
            const int64_t expire_timestamp, const uint64_t tenant_id,
-           Compare *compare);
+           Compare *compare, const int count = 0);
   int add_item(const T &item);
   int add_item_reuse(const T &item);
   int do_sort(const bool final_merge);
@@ -2065,6 +2073,7 @@ public:
 private:
   static const int64_t EXTERNAL_SORT_ROUND_CNT = 2;
   bool is_inited_;
+  int count_;
   int64_t file_buf_size_;
   int64_t buf_mem_limit_;
   int64_t expire_timestamp_;
@@ -2092,8 +2101,8 @@ template <typename T, typename Compare>
 int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
                                      const int64_t file_buf_size,
                                      const int64_t expire_timestamp,
-                                     const uint64_t tenant_id,
-                                     Compare *compare) {
+                                     const uint64_t tenant_id, Compare *compare,
+                                     const int count) {
   int ret = common::OB_SUCCESS;
   int64_t macro_block_size = OB_SERVER_BLOCK_MGR.get_macro_block_size();
   if (OB_UNLIKELY(is_inited_)) {
@@ -2123,14 +2132,15 @@ int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
                   K(buf_mem_limit_), K(file_buf_size_),
                   K(merge_count_per_round_));
     } else if (OB_FAIL(curr_round_->init(merge_count_per_round_, file_buf_size_,
-                                         expire_timestamp, tenant_id_,
-                                         compare_))) {
+                                         expire_timestamp, tenant_id_, compare_,
+                                         count_))) {
       STORAGE_LOG(WARN, "fail to init current sort round", K(ret));
     } else if (OB_FAIL(memory_sort_round_.init(buf_mem_limit_, expire_timestamp,
                                                compare_, curr_round_))) {
       STORAGE_LOG(WARN, "fail to init memory sort round", K(ret));
     } else {
       is_inited_ = true;
+      count_ = count;
     }
   }
   return ret;
@@ -2187,7 +2197,8 @@ int ObExternalSort<T, Compare>::do_sort(const bool final_merge) {
       const int64_t start_time = common::ObTimeUtility::current_time();
       STORAGE_LOG(INFO, "do sort start round", K(round_id));
       if (OB_FAIL(next_round_->init(merge_count_per_round_, file_buf_size_,
-                                    expire_timestamp_, tenant_id_, compare_))) {
+                                    expire_timestamp_, tenant_id_, compare_,
+                                    count_))) {
         STORAGE_LOG(WARN, "fail to init next sort round", K(ret));
       } else if (OB_FAIL(curr_round_->do_merge(*next_round_))) {
         STORAGE_LOG(WARN, "fail to do merge fragments of current round",
@@ -2235,7 +2246,8 @@ int ObExternalSort<T, Compare>::do_sort_reuse(const bool final_merge) {
       const int64_t start_time = common::ObTimeUtility::current_time();
       STORAGE_LOG(INFO, "do sort start round", K(round_id));
       if (OB_FAIL(next_round_->init(merge_count_per_round_, file_buf_size_,
-                                    expire_timestamp_, tenant_id_, compare_))) {
+                                    expire_timestamp_, tenant_id_, compare_,
+                                    count_))) {
         STORAGE_LOG(WARN, "fail to init next sort round", K(ret));
       } else if (OB_FAIL(curr_round_->do_merge(*next_round_))) {
         STORAGE_LOG(WARN, "fail to do merge fragments of current round",
@@ -2287,6 +2299,7 @@ template <typename T, typename Compare>
 void ObExternalSort<T, Compare>::clean_up() {
   int tmp_ret = common::OB_SUCCESS;
   is_inited_ = false;
+  count_ = 0;
   file_buf_size_ = 0;
   buf_mem_limit_ = 0;
   expire_timestamp_ = 0;
@@ -2400,7 +2413,7 @@ int ObExternalSort<T, Compare>::transfer_final_sorted_fragment_iter(
   return ret;
 }
 
-} // end namespace sql
+} // end namespace storage
 } // end namespace oceanbase
 
-#endif // OCEANBASE_SQL_OB_PARALLEL_EXTERNAL_SORT_H_
+#endif // OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_

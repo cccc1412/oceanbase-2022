@@ -550,7 +550,7 @@ public:
   int init(const int64_t *fds, const int64_t dir_id,
            const int64_t expire_timestamp, const uint64_t tenant_id,
            const T &sample_item, const int64_t buf_size,
-           int64_t *first_buf_sizes);
+           int64_t *first_buf_sizes, int count);
   // int64_t start_=0;
   // int64_t end_=-1;
   int open();
@@ -560,7 +560,9 @@ public:
 private:
   int prefetch(int idx, bool is_open_prefetch);
   int prefetch_all(bool is_open_prefetch);
+  int wait_all();
   int wait(int idx);
+  int pipeline_all();
   int pipeline(int idx);
   void reset();
 
@@ -578,7 +580,7 @@ private:
   const int64_t *fds_;
   int64_t dir_id_;
   T curr_item_;
-  blocksstable::ObTmpFileIOHandle *file_io_handles_[MAX_HANDLE_COUNT];
+  blocksstable::ObTmpFileIOHandle file_io_handles_[MAX_COL_LEN][MAX_HANDLE_COUNT];
   int64_t *handle_cursor_;
   //char *buf_;
   common::ObArray<char *> buf_;  
@@ -599,7 +601,7 @@ public:
 
 template <typename T>
 ObFragmentReaderV2<T>::ObFragmentReaderV2()
-    : is_inited_(false), is_decompress_buffer_inited_(false), expire_timestamp_(0),
+    : is_inited_(false), expire_timestamp_(0),
       allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
       sample_allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
@@ -607,7 +609,7 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
       macro_buffer_readers_(NULL), fds_(NULL), dir_id_(-1), curr_item_(),
       buf_(),
       tenant_id_(common::OB_INVALID_ID), is_prefetch_end_(false), buf_size_(0),
-      is_first_prefetch_(true), is_open_prefetch_(true), current_size_ (0){}
+      is_first_prefetch_(true), current_size_ (0){}
 
 template <typename T> ObFragmentReaderV2<T>::~ObFragmentReaderV2() { reset(); }
 
@@ -719,7 +721,7 @@ template <typename T> int ObFragmentReaderV2<T>::prefetch(int idx, bool is_open_
               io_info, file_io_handles_[handle_cursor_[idx] % MAX_HANDLE_COUNT]))) {
         if (common::OB_ITER_END != ret) {
           STORAGE_LOG(WARN, "fail to do aio read from macro file", K(ret),
-                      K(fd_));
+                      K(fds_[idx]));
         } else {
           is_prefetch_end_ = true;
           ret = OB_SUCCESS;
@@ -771,7 +773,7 @@ template <typename T> int ObFragmentReaderV2<T>::wait_all() {
     } else if (OB_FAIL(file_io_handles_[i][wait_cursor].wait(timeout_ms))) {
       STORAGE_LOG(WARN, "fail to wait io finish", K(ret), K(timeout_ms));
     } else {
-      macro_buffer_reader_.assign(0, buf_size_,
+      macro_buffer_readers_[i].assign(0, buf_size_,
                                   file_io_handles_[i][wait_cursor].get_buffer());
     }
   }
@@ -828,7 +830,7 @@ template <typename T> int ObFragmentReaderV2<T>::get_next_item(const T *&item) {
   }
 
   if (OB_SUCC(ret)) {
-    for(int i = 0; i < count_; i++) {
+    for(int idx = 0; idx < count_; idx++) {
       if (OB_FAIL(macro_buffer_readers_[idx].read_item(curr_item_, idx))) {
         if (common::OB_EAGAIN == ret) {
           if (OB_FAIL(pipeline(idx))) {
@@ -851,16 +853,21 @@ template <typename T> int ObFragmentReaderV2<T>::get_next_item(const T *&item) {
 
 template <typename T> void ObFragmentReaderV2<T>::reset() {
   is_inited_ = false;
-  is_decompress_buffer_inited_ = false;
+  //is_decompress_buffer_inited_ = false;
+  memset(is_decompress_buffer_inited_, 0, sizeof(bool) * MAX_COL_LEN);
   expire_timestamp_ = 0;
   allocator_.reset();
   sample_allocator_.reset();
-  macro_buffer_reader_.assign(0, 0, NULL);
+  for(int i = 0; i < count_; i++) {
+    macro_buffer_readers_[i].assign(0, 0, NULL);
+  }
   //macro_buffer_reader_.assignv2(0,0);
-  fd_ = -1;
+  //fd_ = -1;
   dir_id_ = -1;
-  for (int64_t i = 0; i < MAX_HANDLE_COUNT; ++i) {
-    file_io_handles_[i].reset();
+  for(int64_t i = 0; i < MAX_COL_LEN; i++) {
+    for (int64_t j = 0; j < MAX_HANDLE_COUNT; ++j) {
+      file_io_handles_[i][j].reset();
+    }
   }
   handle_cursor_ = 0;
   buf_ = NULL;
@@ -868,7 +875,6 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
   is_prefetch_end_ = false;
   buf_size_ = 0;
   is_first_prefetch_ = true;
-  is_open_prefetch_ = true;
   current_size_=0;
 }
 

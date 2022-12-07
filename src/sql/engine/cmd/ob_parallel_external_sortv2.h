@@ -460,7 +460,7 @@ template <typename T, typename C> int ObFragmentWriterV2<T, C>::sync() {
 
 template <typename T, typename C> void ObFragmentWriterV2<T, C>::reset() {
   is_inited_ = false;
-  count_ = 0;
+  //count_ = 0;
   col_descs_.reset();
   bufs_.reset();
   compress_bufs_.reset();

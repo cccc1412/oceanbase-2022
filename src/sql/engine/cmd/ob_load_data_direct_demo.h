@@ -10,7 +10,7 @@
 #include "sql/engine/cmd/ob_load_data_parser.h"
 #include "storage/blocksstable/ob_index_block_builder.h"
 #include "storage/tx_storage/ob_ls_handle.h"
-#include "ob_parallel_external_sort.h"
+#include "ob_parallel_external_sortv2.h"
 
 #include <atomic>
 #include <thread>

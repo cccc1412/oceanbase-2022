@@ -648,7 +648,8 @@ int ObFragmentReaderV2<T>::init(
       STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
     } else {
       expire_timestamp_ = expire_timestamp;
-      handle_cursor_ = 0;
+      //handle_cursor_ = 0;
+      memset(handle_cursor_, 0 , sizeof(int64_t) * MAX_COL_LEN);
       fds_ = fds;
       dir_id_ = dir_id;
       tenant_id_ = tenant_id;
@@ -869,7 +870,8 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
       file_io_handles_[i][j].reset();
     }
   }
-  handle_cursor_ = 0;
+  //handle_cursor_ = 0;
+  memset(handle_cursor_, 0 , sizeof(int64_t)*MAX_COL_LEN);
   buf_ = NULL;
   tenant_id_ = common::OB_INVALID_ID;
   is_prefetch_end_ = false;

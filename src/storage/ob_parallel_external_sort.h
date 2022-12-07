@@ -581,7 +581,7 @@ private:
   int64_t dir_id_;
   T curr_item_;
   blocksstable::ObTmpFileIOHandle file_io_handles_[MAX_COL_LEN][MAX_HANDLE_COUNT];
-  int64_t *handle_cursor_;
+  int64_t handle_cursor_[MAX_COL_LEN];
   //char *buf_;
   common::ObArray<char *> buf_;  
   uint64_t tenant_id_;
@@ -718,7 +718,7 @@ template <typename T> int ObFragmentReaderV2<T>::prefetch(int idx, bool is_open_
       io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
       io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_READ);
       if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_read(
-              io_info, file_io_handles_[handle_cursor_[idx] % MAX_HANDLE_COUNT]))) {
+              io_info, file_io_handles_[idx][handle_cursor_[idx] % MAX_HANDLE_COUNT]))) {
         if (common::OB_ITER_END != ret) {
           STORAGE_LOG(WARN, "fail to do aio read from macro file", K(ret),
                       K(fds_[idx]));
@@ -791,7 +791,7 @@ template <typename T> int ObFragmentReaderV2<T>::pipeline_all() {
     if (common::OB_ITER_END != ret) {
       STORAGE_LOG(WARN, "fail to wait io finish", K(ret));
     }
-  } else if (OB_FAIL(prefetch_all())) {//perfetch next next buffer,里面解析next buffer的header
+  } else if (OB_FAIL(prefetch_all(false))) {//perfetch next next buffer,里面解析next buffer的header
     STORAGE_LOG(WARN, "fail to prefetch data", K(ret));
   }
   return ret;
@@ -881,8 +881,10 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
 template <typename T> int ObFragmentReaderV2<T>::clean_up() {
   int ret = common::OB_SUCCESS;
   if (is_inited_) {
-    if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.remove(fd_))) {
-      STORAGE_LOG(WARN, "fail to remove macro file", K(ret));
+    for(int i = 0; i < count_; i++) {
+      if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.remove(fds_[i]))) {
+        STORAGE_LOG(WARN, "fail to remove macro file", K(ret));
+      }
     }
     reset();
   }

@@ -563,10 +563,10 @@ template <typename T> class ObFragmentReaderV2 : public ObFragmentIterator<T> {
 public:
   ObFragmentReaderV2();
   virtual ~ObFragmentReaderV2();
-  int init(const int64_t fd, const int64_t dir_id,
+  int init(const int64_t *fds, const int64_t dir_id,
            const int64_t expire_timestamp, const uint64_t tenant_id,
            const T &sample_item, const int64_t buf_size,
-           int64_t first_buf_size);
+           int64_t *first_buf_sizes);
   // int64_t start_=0;
   // int64_t end_=-1;
   int open();
@@ -586,13 +586,17 @@ private:
   int64_t expire_timestamp_;
   common::ObArenaAllocator allocator_;
   common::ObArenaAllocator sample_allocator_;
-  ObMacroBufferReader<T> macro_buffer_reader_;
-  int64_t fd_;
+  //ObMacroBufferReader<T> macro_buffer_reader_;
+  ObMacroBufferReader<T> *macro_buffer_readers_;
+  //int64_t fd_;
+  int32_t count_;
+  const int64_t *fds_;
   int64_t dir_id_;
   T curr_item_;
   blocksstable::ObTmpFileIOHandle file_io_handles_[MAX_HANDLE_COUNT];
   int64_t handle_cursor_;
-  char *buf_;
+  //char *buf_;
+  common::ObArray<char *> bufs_;  
   uint64_t tenant_id_;
   bool is_prefetch_end_;
   int64_t buf_size_;
@@ -603,8 +607,8 @@ private:
 
 public:
 
-  int64_t get_next_buf_size() {
-    return macro_buffer_reader_.get_next_buf_size();
+  int64_t get_next_buf_size(int idx) {
+    return macro_buffer_readers_[idx].get_next_buf_size();
   }
 };
 
@@ -615,8 +619,8 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
       sample_allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                         OB_MALLOC_NORMAL_BLOCK_SIZE),
-      macro_buffer_reader_(), fd_(-1), dir_id_(-1), curr_item_(),
-      file_io_handles_(), handle_cursor_(-1), buf_(NULL),
+      macro_buffer_readers_(NULL), fds_(NULL), dir_id_(-1), curr_item_(),
+      file_io_handles_(), handle_cursor_(-1), bufs_(),
       tenant_id_(common::OB_INVALID_ID), is_prefetch_end_(false), buf_size_(0),
       is_first_prefetch_(true), is_open_prefetch_(true), current_size_ (0){}
 
@@ -624,7 +628,7 @@ template <typename T> ObFragmentReaderV2<T>::~ObFragmentReaderV2() { reset(); }
 
 template <typename T>
 int ObFragmentReaderV2<T>::init(
-    const int64_t fd, const int64_t dir_id, const int64_t expire_timestamp,
+    const int64_t *fds, const int64_t dir_id, const int64_t expire_timestamp,
     const uint64_t tenant_id, const T &sample_item, const int64_t buf_size,
     int64_t first_buf_size) {
   int ret = common::OB_SUCCESS;
@@ -648,10 +652,16 @@ int ObFragmentReaderV2<T>::init(
       STORAGE_LOG(WARN, "failed to alloc buf", K(ret), K(buf_len));
     } else if (OB_FAIL(curr_item_.deep_copy(sample_item, buf, buf_len, pos))) {
       STORAGE_LOG(WARN, "failed to deep copy item", K(ret));
+    } else if(OB_ISNULL(
+                   macro_buffer_readers_=
+                       static_cast<ObMacroBufferReader<T> *>(allocator_.alloc(
+                           sizeof(ObMacroBufferReader<T>) * count_)))) {
+      ret = common::OB_ALLOCATE_MEMORY_FAILED;
+      STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
     } else {
       expire_timestamp_ = expire_timestamp;
       handle_cursor_ = 0;
-      fd_ = fd;
+      fds_ = fds;
       dir_id_ = dir_id;
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
@@ -666,6 +676,15 @@ int ObFragmentReaderV2<T>::init(
   return ret;
 }
 
+
+template <typename T> int ObFragmentReaderV2<T>::prefetch_all() {
+  for(int i = 0; i < count_; i++) {
+    if(OB_FAIL(prefetch(i))) {
+      STORAGE_LOG(WARN, "fail tp prefetch data", K(ret), K(i));
+    }
+  }
+}
+
 template <typename T> int ObFragmentReaderV2<T>::open() {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
@@ -677,7 +696,7 @@ template <typename T> int ObFragmentReaderV2<T>::open() {
   return ret;
 }
 
-template <typename T> int ObFragmentReaderV2<T>::prefetch() {
+template <typename T> int ObFragmentReaderV2<T>::prefetch(int idx) {
   int ret = common::OB_SUCCESS;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;

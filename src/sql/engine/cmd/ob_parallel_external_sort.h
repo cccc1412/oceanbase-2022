@@ -10,8 +10,8 @@
  * Mulan PubL v2 for more details.
  */
 
-#ifndef OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
-#define OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
+#ifndef OCEANBASE_SQL_OB_PARALLEL_EXTERNAL_SORT_H_
+#define OCEANBASE_SQL_OB_PARALLEL_EXTERNAL_SORT_H_
 
 #include "blocksstable/ob_block_manager.h"
 #include "blocksstable/ob_block_sstable_struct.h"
@@ -31,7 +31,7 @@
 #include <cstring>
 
 namespace oceanbase {
-namespace storage {
+namespace sql {
 
 struct ObExternalSortConstant {
   static const int64_t BUF_HEADER_LENGTH =
@@ -164,7 +164,7 @@ public:
   int write_item(const T &item);
   int sync();
   void reset();
-  int count() const {return count_;}
+  int count() const { return count_; }
   int64_t get_fd(int idx) const { return fds_[idx]; }
   int64_t get_dir_id() const { return dir_id_; }
   const T &get_sample_item() const { return sample_item_; }
@@ -195,8 +195,8 @@ private:
 
 template <typename T>
 ObFragmentWriterV2<T>::ObFragmentWriterV2()
-    : is_inited_(false), bufs_(), compress_bufs_(),
-      buf_size_(0), compress_buf_size_(0), macro_buffer_writers_(NULL),
+    : is_inited_(false), bufs_(), compress_bufs_(), buf_size_(0),
+      compress_buf_size_(0), macro_buffer_writers_(NULL),
       file_io_handles_(NULL), fds_(NULL), expire_timestamp_(0),
       allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
@@ -222,7 +222,7 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
                 K(expire_timestamp));
   } else {
     dir_id_ = dir_id;
-    count_=count;
+    count_ = count;
     char *buf_ = NULL;
     char *compress_buf_ = NULL;
     const int64_t align_buf_size = common::lower_align(
@@ -256,8 +256,8 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
     } else {
-      buf_size_=align_buf_size;
-      compress_buf_size_=compress_align_buf_size;
+      buf_size_ = align_buf_size;
+      compress_buf_size_ = compress_align_buf_size;
       new (macro_buffer_writers_) ObMacroBufferWriter<T>[ count_ ];
       new (file_io_handles_) blocksstable::ObTmpFileIOHandle[count_];
       for (int i = 0; i < count_ && OB_SUCC(ret); i++) {
@@ -269,7 +269,8 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
         } else if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.open(fds_[i], dir_id_))) {
           STORAGE_LOG(WARN, "fail to open file", K(ret));
         } else {
-          macro_buffer_writers_[i].assign(ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, bufs_[i]);
+          macro_buffer_writers_[i].assign(
+              ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, bufs_[i]);
         }
       }
       expire_timestamp_ = expire_timestamp;
@@ -301,7 +302,8 @@ template <typename T> int ObFragmentWriterV2<T>::write_item(const T &item) {
   }
 
   if (OB_SUCC(ret) && !has_sample_item_) {
-    const int64_t buf_len = item.get_deep_copy_size(); // deep copy size may be 0
+    const int64_t buf_len =
+        item.get_deep_copy_size(); // deep copy size may be 0
     char *buf = NULL;
     int64_t pos = 0;
     if (buf_len > 0 &&
@@ -347,9 +349,12 @@ template <typename T> int ObFragmentWriterV2<T>::flush_buffer(int idx) {
                  bufs_[idx] + ObExternalSortConstant::BUF_HEADER_LENGTH,
                  macro_buffer_writers_[idx].size() -
                      ObExternalSortConstant::BUF_HEADER_LENGTH,
-                 compress_bufs_[idx] + ObExternalSortConstant::BUF_HEADER_LENGTH,compress_buf_size_,compress_size))) {
+                 compress_bufs_[idx] +
+                     ObExternalSortConstant::BUF_HEADER_LENGTH,
+                 compress_buf_size_, compress_size))) {
     STORAGE_LOG(WARN, "fail to compress", K(compress_size), K(buf_size_));
-  } else if (OB_FAIL(macro_buffer_writers_[idx].assign(compress_size + ObExternalSortConstant::BUF_HEADER_LENGTH,
+  } else if (OB_FAIL(macro_buffer_writers_[idx].assign(
+                 compress_size + ObExternalSortConstant::BUF_HEADER_LENGTH,
                  buf_size_, compress_bufs_[idx]))) {
     STORAGE_LOG(WARN, "faile to assign macro buffer writer");
   } else if (OB_FAIL(macro_buffer_writers_[idx].serialize_header())) {
@@ -365,10 +370,12 @@ template <typename T> int ObFragmentWriterV2<T>::flush_buffer(int idx) {
     io_info.buf_ = compress_bufs_[idx];
     io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
     io_info.io_desc_.set_wait_event(ObWaitEventIds::DB_FILE_INDEX_BUILD_WRITE);
-    if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info, file_io_handles_[idx]))) {
+    if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.aio_write(io_info,
+                                                   file_io_handles_[idx]))) {
       STORAGE_LOG(WARN, "fail to do aio write macro file", K(ret), K(io_info));
     } else {
-      macro_buffer_writers_[idx].assign(ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, bufs_[idx]);
+      macro_buffer_writers_[idx].assign(
+          ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, bufs_[idx]);
     }
   }
   return ret;
@@ -379,7 +386,7 @@ template <typename T> int ObFragmentWriterV2<T>::sync() {
   if (is_inited_) {
     for (int i = 0; i < count_; i++) {
       bool need_flush = false;
-      if (OB_FAIL(check_need_flush(need_flush,i))) {
+      if (OB_FAIL(check_need_flush(need_flush, i))) {
         STORAGE_LOG(WARN, "fail to check need flush", K(ret));
       } else if (need_flush) {
         if (OB_FAIL(flush_buffer())) {
@@ -398,7 +405,8 @@ template <typename T> int ObFragmentWriterV2<T>::sync() {
                        expire_timestamp_, timeout_ms))) {
           STORAGE_LOG(WARN, "fail to get io timeout ms", K(ret),
                       K(expire_timestamp_));
-        } else if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.sync(fds_[i], timeout_ms))) {
+        } else if (OB_FAIL(
+                       FILE_MANAGER_INSTANCE_V2.sync(fds_[i], timeout_ms))) {
           STORAGE_LOG(WARN, "fail to sync macro file", K(ret));
         }
       }
@@ -409,10 +417,11 @@ template <typename T> int ObFragmentWriterV2<T>::sync() {
 
 template <typename T> void ObFragmentWriterV2<T>::reset() {
   is_inited_ = false;
-  count_=0;
+  count_ = 0;
   bufs_.reset();
   compress_bufs_.reset();
   buf_size_ = 0;
+  compress_buf_size=0;
   macro_buffer_writers_ = NULL;
   file_io_handles_ = NULL;
   fds_ = NULL;
@@ -2391,7 +2400,7 @@ int ObExternalSort<T, Compare>::transfer_final_sorted_fragment_iter(
   return ret;
 }
 
-} // end namespace storage
+} // end namespace sql
 } // end namespace oceanbase
 
-#endif // OCEANBASE_STORAGE_OB_PARALLEL_EXTERNAL_SORT_H_
+#endif // OCEANBASE_SQL_OB_PARALLEL_EXTERNAL_SORT_H_

@@ -44,7 +44,7 @@ struct ObExternalSortConstant {
   static const int64_t DEFAULT_FILE_READ_WRITE_BUFFER = 2 * 1024 * 1024LL; // 2m
   static const int64_t MIN_MULTIPLE_MERGE_COUNT = 2;
   static const int64_t DECOMPRESS_BUFFER_SIZE = 4*1024LL*1024LL;
-  static const int64_t MAX_SERIALIZE_SIZE = 10000;
+  static const int64_t MAX_SERIALIZE_SIZE = 500;
   static inline int get_io_timeout_ms(const int64_t expire_timestamp,
                                       int64_t &wait_time_ms);
   static inline bool is_timeout(const int64_t expire_timestamp);
@@ -119,8 +119,8 @@ template <typename T> ObMacroBufferWriter<T>::~ObMacroBufferWriter() {}
 
 template <typename T> int ObMacroBufferWriter<T>::write_item(const T &item) {
   int ret = common::OB_SUCCESS;
-  if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
-  //if(ObExternalSortConstant::MAX_SERIALIZE_SIZE + buf_pos_ > buf_cap_) {
+  //if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
+  if(ObExternalSortConstant::MAX_SERIALIZE_SIZE + buf_pos_ > buf_cap_) {
     ret = common::OB_EAGAIN;
   } else if (OB_FAIL(item.serialize(buf_, buf_cap_, buf_pos_))) {
     STORAGE_LOG(WARN, "fail to serialize item", K(ret));

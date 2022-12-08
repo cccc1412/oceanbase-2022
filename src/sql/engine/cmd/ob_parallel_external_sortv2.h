@@ -85,6 +85,7 @@ public:
   ObFragmentIterator() {}
   virtual ~ObFragmentIterator() {}
   virtual int get_next_item(const T *&item) = 0;
+  virtual int prefetch_all() { return common::OB_SUCCESS; }
   virtual int clean_up() { return common::OB_SUCCESS; }
   virtual int prefetch() { return common::OB_SUCCESS; }
   virtual TO_STRING_KV(K(""));
@@ -651,7 +652,7 @@ private:
   bool is_prefetch_end_[MAX_COL_LEN];
   int64_t buf_size_;
   bool is_first_prefetch_;
-
+  bool is_open_prefetch_[MAX_COL_LEN];
   //bool is_decompress_buffer_inited_[MAX_COL_LEN];
 
 public:
@@ -669,10 +670,11 @@ ObFragmentReaderV2<T>::ObFragmentReaderV2()
       sample_allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                         OB_MALLOC_NORMAL_BLOCK_SIZE),
       dir_id_(-1), expire_timestamp_(0), tenant_id_(common::OB_INVALID_ID),
-      buf_size_(0), is_first_prefetch_(true),
+      buf_size_(0), is_first_prefetch_(true)
       {
         memset(bufs_, 0 ,sizeof(void*)*MAX_COL_LEN);
         memset(is_prefetch_end_, 0 ,sizeof(bool) * MAX_COL_LEN);
+        memset(is_open_prefetch_, 1, sizeof(bool) * MAX_COL_LEN);
       };
 
 template <typename T> ObFragmentReaderV2<T>::~ObFragmentReaderV2() { reset(); }
@@ -760,8 +762,6 @@ template <typename T> int ObFragmentReaderV2<T>::open() {
     STORAGE_LOG(WARN, "ObFragmentReaderV2 has not been inited", K(ret));
   } else if (OB_FAIL(prefetch_all())) {
     STORAGE_LOG(WARN, "fail to prefetch data", K(ret));
-  } else {
-    is_first_prefetch_ = false;
   }
   return ret;
 }
@@ -787,8 +787,9 @@ int ObFragmentReaderV2<T>::prefetch(int idx) {
       blocksstable::ObTmpFileIOInfo io_info;
       io_info.fd_ = fds_[idx];
       io_info.dir_id_ = dir_id_;
-      if (unlikely(is_first_prefetch_)) {
+      if (unlikely(is_open_prefetch_[idx])) {
         io_info.size_ = first_buf_sizes_[idx] + 8;
+        is_open_prefetch_[idx] = false;
       } else {
         io_info.size_ = get_next_buf_size(idx) + 8;
       }
@@ -949,7 +950,7 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
   // fd_ = -1;
   fds_ = NULL;
   dir_id_ = -1;
-  file_io_handles_ = NULL;
+  //file_io_handles_ = NULL;
   //for (int64_t i = 0; i < MAX_COL_LEN; i++) {
   //  for (int64_t j = 0; j < MAX_HANDLE_COUNT; ++j) {
   //    file_io_handles_[i][j].reset();
@@ -962,6 +963,7 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
   tenant_id_ = common::OB_INVALID_ID;
   //is_prefetch_end_ = false;
   memset(is_prefetch_end_, 0, sizeof(bool) * MAX_COL_LEN);
+  memset(is_open_prefetch_, 1, sizeof(bool) * MAX_COL_LEN);
   buf_size_ = 0;
   is_first_prefetch_ = true;
 }
@@ -1114,7 +1116,7 @@ int ObFragmentMerge<T, Compare>::open() {
     STORAGE_LOG(WARN, "ObFragmentMerge has been opened before", K(ret));
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < iters_.count(); ++i) {
-      if (OB_FAIL(iters_.at(i)->prefetch())) {
+      if (OB_FAIL(iters_.at(i)->prefetch_all())) {
         STORAGE_LOG(WARN, "fail to prefetch", K(ret));
       }
     }

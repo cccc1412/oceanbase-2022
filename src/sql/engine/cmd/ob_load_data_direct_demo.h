@@ -327,7 +327,7 @@ public:
         int64_t pop_size = this->get_pop_size() / (1LL << 20);
         int64_t push_size = this->get_push_size() / (1LL << 20);
         int64_t remain_size = push_size - pop_size;
-        LOG_INFO("[OB_LOAD_INFO]", "sort_queue", i, "pop_size", pop_size,
+        LOG_INFO("[OB_LOAD_DEBUG]", "sort_queue", i, "pop_size", pop_size,
                   "push_size", push_size, "remain_size", remain_size);
       }
     };

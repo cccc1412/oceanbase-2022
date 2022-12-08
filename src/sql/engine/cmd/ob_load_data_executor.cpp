@@ -22,6 +22,8 @@
 
 #include <stdlib.h>
 
+// #define LOAD_DEBUG_PRINT
+
 namespace oceanbase {
 namespace sql {
 int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
@@ -57,7 +59,9 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     }
   }
   if (OB_SUCC(ret)) {
+#ifdef LOAD_DEBUG_PRINT
     dispatcher.debug_print();
+#endif
     if (OB_FAIL(
             do_execute(ctx, stmt, dispatcher, sort_queues, sstable_writer))) {
       LOG_WARN("do process fail", KR(ret));
@@ -85,9 +89,11 @@ int ObLoadDataExecutor::do_execute(ObExecContext &ctx, ObLoadDataStmt &stmt,
     process_async_tq.wait_task();
     process_async_tq.stop();
     process_async_tq.wait();
+#ifdef LOAD_DEBUG_PRINT
     for (int i = 0; i < LOAD_THREAD_NUM; i++) {
       sort_queues[i].debug_print(i);
     }
+#endif
     if (OB_FAIL(
             do_load2(load_async_tq2, ctx, stmt, sort_queues, sstable_writer))) {
       LOG_WARN("do load2 fail", KR(ret));

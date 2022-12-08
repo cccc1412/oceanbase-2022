@@ -19,7 +19,7 @@ namespace oceanbase {
 namespace sql {
 
 static const int64_t MAX_RECORD_SIZE = (1LL << 12);          // 4K
-static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 240LL;  // 540M
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 540LL;  // 540M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);         // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);             // 1M
 static const int64_t BUFFER_NUM = (3LL << 20) + (6LL << 19); // 4M

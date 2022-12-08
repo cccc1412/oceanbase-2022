@@ -244,7 +244,7 @@ int ObFragmentWriterV2<T, C>::open(const int64_t buf_size,
     char *buf_ = NULL;
     char *compress_buf_ = NULL;
     const int64_t align_buf_size = common::lower_align(
-        buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
+        buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) / 16;
     const int64_t compress_align_buf_size =
         align_buf_size + align_buf_size / 255 + 32;
     memset(is_first_write_, 1, sizeof(bool)*MAX_COL_LEN);
@@ -492,10 +492,11 @@ public:
   void assignv2(const int64_t buf_pos, const int64_t buf_cap);
   int64_t get_next_buf_size();
   void set_next_buf_size(int64_t len) { next_buf_len_ = len; }
-  void init_decompress_buffer(common::ObArenaAllocator &allocator) {
+  void init_decompress_buffer(common::ObArenaAllocator &allocator, int size) {
     if (decompress_buf_ == NULL) {
       decompress_buf_ = static_cast<char *>(
-          allocator.alloc(ObExternalSortConstant::DECOMPRESS_BUFFER_SIZE));
+          allocator.alloc(size));
+      decompress_buf_len_ = size;
       // decompress_buf_ =
       // (char*)ob_malloc(ObExternalSortConstant::DECOMPRESS_BUFFER_SIZE);
     }
@@ -511,6 +512,7 @@ private:
   int64_t buf_len_;
   int64_t buf_cap_;
   int64_t next_buf_len_;
+  int64_t decompress_buf_len_;
 };
 
 template <typename T> int64_t ObMacroBufferReader<T>::get_next_buf_size() {
@@ -521,7 +523,7 @@ template <typename T> int64_t ObMacroBufferReader<T>::get_next_buf_size() {
   }
   int64_t decompress_size = 0;
   compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,
-                         ObExternalSortConstant::DECOMPRESS_BUFFER_SIZE,
+                         decompress_buf_len_,
                          decompress_size);
   char *next_buf_start = const_cast<char *>(buf_) + buf_len_;
   memcpy(decompress_buf_, buf_, 8);
@@ -697,6 +699,7 @@ int ObFragmentReaderV2<T>::init(const int64_t *fds, const int64_t dir_id,
     STORAGE_LOG(WARN, "invalid argument", K(ret), K(tenant_id),
                 K(expire_timestamp), K(buf_size));
   } else {
+    allocator_.set_tenant_id(MTL_ID());
     dir_id_ = dir_id;
     count_ = count;
     col_descs_ = col_descs;
@@ -775,13 +778,13 @@ int ObFragmentReaderV2<T>::prefetch(int idx) {
   } else {
     if (nullptr == bufs_[idx]) {
       if (OB_ISNULL(bufs_[idx] =
-                        static_cast<char *>(allocator_.alloc(buf_size_)))) {
+                        static_cast<char *>(allocator_.alloc(2*first_buf_sizes_[idx])))) {
         ret = common::OB_ALLOCATE_MEMORY_FAILED;
-        STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
+        STORAGE_LOG(WARN, "fail to allocate memory", K(ret), K(first_buf_sizes_[idx]));
       }
     }
     if (is_first_prefetch_) {
-      macro_buffer_readers_[idx].init_decompress_buffer(allocator_);
+      macro_buffer_readers_[idx].init_decompress_buffer(allocator_, buf_size_+ 32);
     }
     if (OB_SUCC(ret)) {
       blocksstable::ObTmpFileIOInfo io_info;

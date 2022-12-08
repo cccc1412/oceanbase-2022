@@ -1257,7 +1257,7 @@ int ObLoadSSTableWriter::append_row(const ObLoadDatumRow &datum_row) {
       }
     }
     if (OB_FAIL(macro_block_writer_.append_row(datum_row_))) {
-      LOG_WARN("fail to append row", KR(ret));
+      LOG_WARN("fail to append row", KR(ret), K(datum_row_));
     }
   }
   return ret;

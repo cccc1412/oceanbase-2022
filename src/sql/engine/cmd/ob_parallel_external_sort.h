@@ -78,7 +78,54 @@ bool ObExternalSortConstant::is_timeout(const int64_t expire_timestamp) {
   return is_timeout;
 }
 
-template <typename T> class ObFragmentIterator {
+// 输入 ObDatum 数组，输出序列化的结果到 dest_buf，修改 pos
+// cap 为 dest_buf 的容量
+// 这里不做 buf 容量的检验，如果序列化的数据超出容量，则会 crash
+typedef int (*encode_func)(const common::ObArray<common::ObDatum *> &src_datums,
+                           char *dest_buf, int64_t &pos, const int64_t cap);
+
+typedef int (*decode_func)(const char *src_buf, DatumArray &dest_datums);
+
+static int default_encode(const common::ObArray<common::ObDatum *> &src_datums,
+                          char *dest_buf, int64_t &pos, const int64_t cap) {
+  int ret = OB_SUCCESS;
+  size_t i = 0;
+  for (; i < src_datums.size() && OB_SUCC(ret); i++) {
+    if (OB_FAIL(src_datums[i]->serialize(dest_buf, cap, pos))) {
+      STORAGE_LOG(WARN, "fail to serialize item", K(ret));
+    }
+  }
+  if (OB_SUCC(ret)) {
+    src_datums.reset();
+  }
+  return ret;
+};
+
+static int int_encode(const common::ObArray<common::ObDatum *> &src_datums,
+                      char *dest_buf, int64_t &pos, const int64_t cap) {
+  int ret = OB_SUCCESS;
+  size_t i = 0;
+  for (; i < src_datums.size() && OB_SUCC(ret); i++) {
+    if (OB_FAIL(src_datums[i]->serialize(dest_buf, cap, pos))) {
+      STORAGE_LOG(WARN, "fail to serialize item", K(ret));
+    }
+  }
+  if (OB_SUCC(ret)) {
+    src_datums.reset();
+  }
+  return ret;
+};
+
+// class IntergerEncode : public iEncode {
+
+// }
+
+// class UIntergerEncode : public iEncode {
+
+// }
+
+class ObFragmentIterator {
+
 public:
   ObFragmentIterator() {}
   virtual ~ObFragmentIterator() {}
@@ -88,12 +135,15 @@ public:
   virtual TO_STRING_KV(K(""));
 };
 
-template <typename T> class ObMacroBufferWriter {
+template <typename T = common::ObDatum> class ObMacroBufferWriter {
+  typedef common::ObArray<T *> DatumArray;
+
 public:
-  ObMacroBufferWriter();
+  ObMacroBufferWriter(){};
   virtual ~ObMacroBufferWriter();
   int write_item(const T &item);
-  int assign(const int64_t buf_pos, const int64_t buf_cap, char *buf);
+  int assign(const int64_t buf_pos, const int64_t buf_cap, char *buf,
+             encode_func encoder);
   int serialize_header();
   bool has_item();
   int64_t size();
@@ -102,7 +152,10 @@ public:
 private:
   char *buf_;
   int64_t buf_pos_;
+  int64_t estimate_buf_pos_;
   int64_t buf_cap_;
+  encode_func encoder_;
+  DatumArray datums;
   DISALLOW_COPY_AND_ASSIGN(ObMacroBufferWriter);
 };
 
@@ -114,12 +167,19 @@ template <typename T> ObMacroBufferWriter<T>::~ObMacroBufferWriter() {}
 
 template <typename T> int ObMacroBufferWriter<T>::write_item(const T &item) {
   int ret = common::OB_SUCCESS;
-  if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
-    ret = common::OB_EAGAIN;
-  } else if (OB_FAIL(item.serialize(buf_, buf_cap_, buf_pos_))) {
-    STORAGE_LOG(WARN, "fail to serialize item", K(ret));
+  const int64_t size = item.get_deep_copy_size();
+  // 可能存在编码后的长度比原本长的情况，甚至超过 buf 容量
+  // 一般假设不会发生
+  if (size + estimate_buf_pos_ > buf_cap_) {
+    if (OB_FAIL(encoder_(datums, buf_, buf_pos_, buf_cap_))) {
+      STORAGE_LOG(WARN, "fail to serialize item", K(ret));
+    } else {
+      ret = common::OB_EAGAIN;
+    }
+  } else if (OB_FAIL(datums.push_back(&item))) {
+    STORAGE_LOG(WARN, "fail to push back", K(ret));
   } else {
-    STORAGE_LOG(DEBUG, "write_item", K(buf_pos_), K(item));
+    estimate_buf_pos_ += size;
   }
   return ret;
 }
@@ -140,11 +200,11 @@ template <typename T> int ObMacroBufferWriter<T>::serialize_header() {
 
 template <typename T>
 int ObMacroBufferWriter<T>::assign(const int64_t pos, const int64_t buf_cap,
-                                   char *buf) {
+                                   char *buf, encode_func encoder) {
   buf_pos_ = pos;
   buf_cap_ = buf_cap;
   buf_ = buf;
-  return OB_SUCCESS;
+  encoder_ = encoder return OB_SUCCESS;
 }
 
 template <typename T> bool ObMacroBufferWriter<T>::has_item() {
@@ -278,8 +338,24 @@ int ObFragmentWriterV2<T, C>::open(const int64_t buf_size,
         } else if (OB_FAIL(FILE_MANAGER_INSTANCE_V2.open(fds_[i], dir_id_))) {
           STORAGE_LOG(WARN, "fail to open file", K(ret));
         } else {
+          encode_func encoder = NULL;
+          switch (col_descs_[i].col_type_.get_type()) {
+          case ObObjType::ObInt32Type:
+          case ObObjType::ObIntType:
+            encoder = int_encode;
+            break;
+          // DECIMAL
+          case ObObjType::ObNumberType:
+          case ObObjType::ObDateType:
+          case ObObjType::ObVarcharType:
+          case ObObjType::ObCharType:
+          default:
+            encoder = default_encode;
+            break;
+          }
           macro_buffer_writers_[i].assign(
-              ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, bufs_[i]);
+              ObExternalSortConstant::BUF_HEADER_LENGTH, buf_size_, bufs_[i],
+              encoder);
         }
       }
       expire_timestamp_ = expire_timestamp;

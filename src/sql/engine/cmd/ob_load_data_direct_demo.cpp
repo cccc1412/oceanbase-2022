@@ -975,12 +975,13 @@ void ObLoadDispatcher::debug_print() {
   auto print_func = [&]() {
     while (!this->is_finished_) {
       usleep(SLEEP_TIME);
-      LOG_INFO("[OB_LOAD_INFO]", "current_num", this->current_num_.load());
+      LOG_INFO("[OB_LOAD_DEBUG]", "current_num", this->current_num_.load());
       for (int i = 0; i < this->dispatch_num_; i++) {
         int64_t pop_size=this->dispatch_queue_[i]->get_pop_size()/(1LL<<20);
         int64_t push_size = this->dispatch_queue_[i]->get_push_size()/(1LL << 20);
         int64_t remain_size = push_size - pop_size;
-        LOG_INFO("[OB_LOAD_INFO]", "dispatch", i, "pop_size",pop_size, "push_size",push_size, "remain_size",remain_size);
+        LOG_INFO("[OB_LOAD_DEBUG]", "dispatch", i, "pop_size", pop_size,
+                 "push_size", push_size, "remain_size", remain_size);
       }
     }
   };
@@ -1089,7 +1090,9 @@ int ObLoadExternalSort::get_next_row(const ObLoadDatumRow *&datum_row) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("unexpected not closed external sort", KR(ret));
   } else if (OB_FAIL(external_sort_.get_next_item(datum_row))) {
-    LOG_WARN("fail to get next item", KR(ret));
+    if (common::OB_ITER_END != ret) {
+      STORAGE_LOG(WARN, "fail to get next item", K(ret));
+    }
   }
   return ret;
 }
@@ -1208,6 +1211,7 @@ int ObLoadSSTableWriter::init_data_store_desc(
   }
   return ret;
 }
+
 int ObLoadSSTableWriter::init_macro_block_writer(const int64_t parallel_idx) {
   int ret = OB_SUCCESS;
   if (IS_NOT_INIT) {
@@ -1639,8 +1643,8 @@ int ObLoadDataDirectDemo::do_load1() {
 
   end=clock();
   t=(end-start)/CLOCKS_PER_SEC;
-  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "external sort time",t);
-  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "load1 data num", count_);
+  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "external sort time", t);
+  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load1 data num", count_);
 
   while (OB_SUCC(ret)) {
     if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
@@ -1679,7 +1683,10 @@ int ObLoadDataDirectDemo::do_load2() {
       }
     } else if (OB_FAIL(sstable_writer_->append_row(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
+      LOG_WARN("[OB_LOAD_WARN]", "thread", index_, "count", count_);
     } else {
+      count_++;
+      // LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "count", count_, K(*datum_row));
       sort_queue_->wait_switch_pop();
     }
   }
@@ -1694,8 +1701,8 @@ int ObLoadDataDirectDemo::do_load2() {
 
   end = clock();
   t = (end - start) / CLOCKS_PER_SEC;
-  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "sstable time", t);
-  LOG_WARN("[OB_LOAD_INFO]", "thread", index_, "load2 data num", count_);
+  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "sstable time", t);
+  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load2 data num", count_);
 
   return ret;
 }

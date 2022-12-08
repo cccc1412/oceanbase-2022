@@ -951,11 +951,11 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
   fds_ = NULL;
   dir_id_ = -1;
   //file_io_handles_ = NULL;
-  //for (int64_t i = 0; i < MAX_COL_LEN; i++) {
-  //  for (int64_t j = 0; j < MAX_HANDLE_COUNT; ++j) {
-  //    file_io_handles_[i][j].reset();
-  //  }
-  //}
+  for (int64_t i = 0; i < MAX_COL_LEN; i++) {
+    for (int64_t j = 0; j < MAX_HANDLE_COUNT; ++j) {
+      file_io_handles_[i][j].reset();
+    }
+  }
 
   memset(handle_cursors_, 0, sizeof(int64_t) * MAX_COL_LEN);
   //bufs_.reset();

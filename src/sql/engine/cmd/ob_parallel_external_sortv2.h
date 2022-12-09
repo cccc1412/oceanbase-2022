@@ -244,7 +244,7 @@ int ObFragmentWriterV2<T, C>::open(const int64_t buf_size,
     char *buf_ = NULL;
     char *compress_buf_ = NULL;
     const int64_t align_buf_size = common::lower_align(
-        buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) / 16;
+        buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
     const int64_t compress_align_buf_size =
         align_buf_size + align_buf_size / 255 + 32;
     memset(is_first_write_, 1, sizeof(bool)*MAX_COL_LEN);
@@ -735,8 +735,7 @@ int ObFragmentReaderV2<T>::init(const int64_t *fds, const int64_t dir_id,
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
       buf_size_ = common::lower_align(
-                      buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) /
-                  3;
+                      buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
       for (int i = 0; i < count_; i++) {
         macro_buffer_readers_[i].set_next_buf_size(first_buf_sizes[i]);
       }
@@ -2347,7 +2346,7 @@ int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
     file_buf_size_ = common::lower_align(file_buf_size, macro_block_size);
     buf_mem_limit_ = mem_limit;
     expire_timestamp_ = expire_timestamp;
-    merge_count_per_round_ = buf_mem_limit_ / file_buf_size_ / 2;
+    merge_count_per_round_ = buf_mem_limit_ / file_buf_size_ / 2 / 16 / 2;
     compare_ = compare;
     tenant_id_ = tenant_id;
     curr_round_ = &sort_rounds_[0];

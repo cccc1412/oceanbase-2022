@@ -213,7 +213,7 @@ public:
   int64_t get_dir_id() const { return dir_id_; }
   const T &get_sample_item() const { return sample_item_; }
   const int64_t *get_first_buf_size() const { return first_buf_size_; }
-  int64_t get_max_buf_size() const { return max_buf_size_; }
+  const int64_t* get_max_buf_size() const { return max_buf_size_; }
 
 private:
   int flush_buffer(int idx);
@@ -228,7 +228,6 @@ private:
   common::ObArray<char *> compress_bufs_;
   common::ObArray<encode_func> encode_funcs_;
   int64_t buf_size_;
-  int64_t max_buf_size_;
   int64_t compress_buf_size_;
   ObMacroBufferWriter<C> *macro_buffer_writers_;
   blocksstable::ObTmpFileIOHandle *file_io_handles_;
@@ -240,6 +239,7 @@ private:
   int64_t dir_id_;
   uint64_t tenant_id_;
   int64_t first_buf_size_[MAX_COL_LEN];
+  int64_t max_buf_size_[MAX_COL_LEN];
   bool is_first_write_[MAX_COL_LEN];
   common::ObLZ4Compressor191 compressor_;
   DISALLOW_COPY_AND_ASSIGN(ObFragmentWriterV2);
@@ -247,8 +247,7 @@ private:
 
 template <typename T, typename C>
 ObFragmentWriterV2<T, C>::ObFragmentWriterV2()
-    : is_inited_(false), bufs_(), compress_bufs_(), buf_size_(0),
-      max_buf_size_(0), compress_buf_size_(0), macro_buffer_writers_(NULL),
+    : is_inited_(false), bufs_(), compress_bufs_(), buf_size_(0), compress_buf_size_(0), macro_buffer_writers_(NULL),
       file_io_handles_(NULL), fds_(NULL), expire_timestamp_(0),
       allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
@@ -319,6 +318,7 @@ int ObFragmentWriterV2<T, C>::open(const int64_t buf_size,
       compress_buf_size_ = compress_align_buf_size;
       new (macro_buffer_writers_) ObMacroBufferWriter<T>[ count_ ];
       new (file_io_handles_) blocksstable::ObTmpFileIOHandle[count_];
+      memset(max_buf_size_,0,sizeof(int64_t)*count_);
       for (int i = 0; i < count_ && OB_SUCC(ret); i++) {
         if (OB_FAIL(bufs_.push_back(buf_ + i * align_buf_size))) {
           STORAGE_LOG(WARN, "fail to push back", K(ret));
@@ -455,7 +455,7 @@ int ObFragmentWriterV2<T, C>::flush_buffer(int idx) {
         first_buf_size_[idx] = compress_size + data_offset;
         is_first_write_[idx] = false;
       }
-      max_buf_size_ = std::max(compress_size + data_offset, max_buf_size_);
+      max_buf_size_[idx] = std::max(compress_size + data_offset, max_buf_size_[idx]);
       io_info.size_ = compress_size + data_offset;
       io_info.tenant_id_ = tenant_id_;
       io_info.buf_ = compress_bufs_[idx];
@@ -534,7 +534,6 @@ template <typename T, typename C> void ObFragmentWriterV2<T, C>::reset() {
   compress_bufs_.reset();
   encode_funcs_.reset();
   buf_size_ = 0;
-  max_buf_size_ = 0;
   compress_buf_size_ = 0;
   macro_buffer_writers_ = NULL;
   file_io_handles_ = NULL;
@@ -543,6 +542,7 @@ template <typename T, typename C> void ObFragmentWriterV2<T, C>::reset() {
   expire_timestamp_ = 0;
   allocator_.reuse();
   has_sample_item_ = false;
+  memset(max_buf_size_, 0, sizeof(int64_t) * MAX_COL_LEN);
   memset(first_buf_size_, 0, sizeof(int64_t) * MAX_COL_LEN);
   memset(is_first_write_, 1, sizeof(bool) * MAX_COL_LEN);
   dir_id_ = -1;
@@ -695,8 +695,8 @@ public:
   int init(const int64_t *fds, const int64_t dir_id,
            const int64_t expire_timestamp, const uint64_t tenant_id,
            const T &sample_item, const int64_t buf_size,
-           const int64_t *first_buf_sizes, const int count,
-           const ObArray<ObColDesc> &col_descs);
+           const int64_t *first_buf_sizes, const int64_t *max_buf_sizes,
+           const int count, const ObArray<ObColDesc> &col_descs);
   int open();
   virtual int get_next_item(const T *&item);
   virtual int clean_up();
@@ -723,6 +723,7 @@ private:
   int64_t handle_cursors_[MAX_COL_LEN];
   int64_t *fds_;
   int64_t *first_buf_sizes_;
+  int64_t *max_buf_sizes_;
 
   T curr_item_;
 
@@ -745,7 +746,7 @@ public:
 template <typename T>
 ObFragmentReaderV2<T>::ObFragmentReaderV2()
     : is_inited_(false), count_(0), col_descs_(), macro_buffer_readers_(NULL),
-      fds_(NULL), first_buf_sizes_(NULL), curr_item_(),
+      fds_(NULL), first_buf_sizes_(NULL), max_buf_sizes_(NULL), curr_item_(),
       allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
                  common::OB_MALLOC_BIG_BLOCK_SIZE),
       sample_allocator_(common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
@@ -764,7 +765,8 @@ int ObFragmentReaderV2<T>::init(const int64_t *fds, const int64_t dir_id,
                                 const int64_t expire_timestamp,
                                 const uint64_t tenant_id, const T &sample_item,
                                 const int64_t buf_size,
-                                const int64_t *first_buf_sizes, const int count,
+                                const int64_t *first_buf_sizes,
+                                const int64_t *max_buf_sizes, const int count,
                                 const ObArray<ObColDesc> &col_descs) {
   int ret = common::OB_SUCCESS;
   allocator_.set_tenant_id(tenant_id);
@@ -805,16 +807,22 @@ int ObFragmentReaderV2<T>::init(const int64_t *fds, const int64_t dir_id,
                              allocator_.alloc(sizeof(int64_t) * count_)))) {
       ret = common::OB_ALLOCATE_MEMORY_FAILED;
       STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
+    } else if (OB_ISNULL(max_buf_sizes_ = static_cast<int64_t *>(
+                             allocator_.alloc(sizeof(int64_t) * count_)))) {
+      ret = common::OB_ALLOCATE_MEMORY_FAILED;
+      STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
     } else {
       memset(handle_cursors_, 0, sizeof(int64_t) * MAX_COL_LEN);
       memcpy(fds_, fds, count_ * sizeof(int64_t));
       memcpy(first_buf_sizes_, first_buf_sizes, count_ * sizeof(int64_t));
+      memcpy(max_buf_sizes_, max_buf_sizes, count_ * sizeof(int64_t));
       new (macro_buffer_readers_) ObMacroBufferReader<T>[ count_ ];
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
       buf_size_ =
           common::lower_align(buf_size, ObExternalSortConstant::ALIGN_SIZE);
       for (int i = 0; i < count_; i++) {
+        max_buf_sizes_[i] = max_buf_sizes_[i] + 32;
         macro_buffer_readers_[i].set_next_buf_size(first_buf_sizes[i]);
       }
       expire_timestamp_ = expire_timestamp;
@@ -852,8 +860,8 @@ template <typename T> int ObFragmentReaderV2<T>::prefetch(int idx) {
     STORAGE_LOG(WARN, "ObFragmentReaderV2 has not been inited", K(ret));
   } else {
     if (nullptr == bufs_[idx]) {
-      if (OB_ISNULL(bufs_[idx] =
-                        static_cast<char *>(allocator_.alloc(buf_size_/2)))) {
+      if (OB_ISNULL(bufs_[idx] = static_cast<char *>(
+                        allocator_.alloc(max_buf_sizes_[idx])))) {
         ret = common::OB_ALLOCATE_MEMORY_FAILED;
         STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
       }
@@ -914,7 +922,8 @@ template <typename T> int ObFragmentReaderV2<T>::wait(int idx) {
     STORAGE_LOG(WARN, "fail to wait io finish", K(ret), K(timeout_ms));
   } else {
     macro_buffer_readers_[idx].assign(
-        0, buf_size_/2, file_io_handles_[idx][wait_cursor].get_buffer());
+        0, max_buf_sizes_[idx],
+        file_io_handles_[idx][wait_cursor].get_buffer());
   }
   return ret;
 }
@@ -937,7 +946,8 @@ template <typename T> int ObFragmentReaderV2<T>::wait_all() {
       STORAGE_LOG(WARN, "fail to wait io finish", K(ret), K(timeout_ms));
     } else {
       macro_buffer_readers_[i].assign(
-          0, buf_size_/2, file_io_handles_[i][wait_cursor].get_buffer());
+          0, max_buf_sizes_[i],
+          file_io_handles_[i][wait_cursor].get_buffer());
     }
   }
   return ret;
@@ -1484,7 +1494,8 @@ int ObExternalSortRound<T, Compare>::build_fragment() {
     if (OB_FAIL(reader->init(
             writer_.get_fds(), writer_.get_dir_id(), expire_timestamp_,
             tenant_id_, writer_.get_sample_item(), file_buf_size_,
-            writer_.get_first_buf_size(), count_, col_descs_))) {
+            writer_.get_first_buf_size(), writer_.get_max_buf_size(), count_,
+            col_descs_))) {
       STORAGE_LOG(WARN, "fail to open reader", K(ret), K(file_buf_size_),
                   K(expire_timestamp_));
     } else if (OB_FAIL(iters_.push_back(reader))) {

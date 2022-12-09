@@ -33,7 +33,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
   }
 
   ObLoadDispatcher dispatcher(PROCESS_THREAD_NUM, LOAD_THREAD_NUM);
-  // dispatcher.debug_print();
+  dispatcher.debug_print();
   ObLoadSSTableWriter sstable_writer;
   if (OB_FAIL(do_execute(ctx, stmt, dispatcher, sstable_writer))) {
     LOG_WARN("do process fail", KR(ret));

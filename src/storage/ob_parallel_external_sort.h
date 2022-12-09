@@ -220,6 +220,7 @@ int ObFragmentWriterV2<T>::open(const int64_t buf_size,
     STORAGE_LOG(WARN, "invalid argument", K(ret), K(buf_size),
                 K(expire_timestamp));
   } else {
+    allocator_.set_tenant_id(tenant_id);
     dir_id_ = dir_id;
     const int64_t align_buf_size = common::lower_align(
         buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
@@ -529,6 +530,7 @@ int ObFragmentReaderV2<T>::init(
     STORAGE_LOG(WARN, "invalid argument", K(ret), K(tenant_id),
                 K(expire_timestamp), K(buf_size));
   } else {
+    allocator_.set_tenant_id(tenant_id);
     const int64_t buf_len =
         sample_item.get_deep_copy_size(); // deep copy size may be 0
     int64_t pos = 0;
@@ -1446,6 +1448,9 @@ public:
       pop_index = 0;
       pop_alloc_id = (pop_alloc_id + 1) % 2;
       pop_alloc = allocator_[pop_alloc_id];
+    } else if (is_finished) {
+      dispatch_data_[pop_alloc_id].reset();
+      pop_alloc->reset();
     }
   }
 

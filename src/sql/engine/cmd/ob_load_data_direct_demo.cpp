@@ -654,14 +654,14 @@ int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
                                  allocator_.alloc(sizeof(ObArenaAllocator)))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(allocator1 = new (buf) ObArenaAllocator(
-                                 common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
+                                 common::ObNewModIds::OB_SQL_LOAD_DATA,
                                  common::OB_MALLOC_BIG_BLOCK_SIZE, MTL_ID()))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(buf =
                                  allocator_.alloc(sizeof(ObArenaAllocator)))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(allocator2 = new (buf) ObArenaAllocator(
-                                 common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
+                                 common::ObNewModIds::OB_SQL_LOAD_DATA,
                                  common::OB_MALLOC_BIG_BLOCK_SIZE, MTL_ID()))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else {

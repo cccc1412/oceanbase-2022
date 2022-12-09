@@ -559,10 +559,14 @@ public:
   int64_t get_next_buf_size();
   void set_next_buf_size(int64_t len) { next_buf_len_ = len; }
   int init_decompress_buffer(common::ObArenaAllocator &allocator, const int64_t buf_size);
+  void set_decode_func(decode_func decoder) {
+    decoder_ = decoder;
+  }
   TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 
 private:
   common::ObLZ4Compressor compressor_;
+  decode_func decoder_;
   const char *buf_;
   char *decompress_buf_;
   int64_t decompress_buf_len_;
@@ -630,7 +634,8 @@ template <typename T> int ObMacroBufferReader<T>::read_item(T &item, int idx) {
     if (buf_pos_ == buf_len_) {
       ret = common::OB_EAGAIN;
     } else if (OB_FAIL(
-                   item.datums_[idx].deserialize(buf_, buf_len_, buf_pos_))) {
+                  decoder_(buf_, buf_pos_, buf_len_, item.datums_[idx]))) {
+                   //item.datums_[idx].deserialize(buf_, buf_len_, buf_pos_))) {
       STORAGE_LOG(WARN, "fail to deserialize buffer", K(ret), K(buf_len_),
                   K(buf_pos_));
     } else {
@@ -714,6 +719,7 @@ private:
   bool is_inited_;
   int count_;
   ObArray<ObColDesc> col_descs_;
+  common::ObArray<decode_func> decode_funcs_;
   char *bufs_[MAX_COL_LEN];
   ObMacroBufferReader<T> *macro_buffer_readers_;
   blocksstable::ObTmpFileIOHandle file_io_handles_[MAX_COL_LEN]
@@ -813,6 +819,23 @@ int ObFragmentReaderV2<T>::init(const int64_t *fds, const int64_t dir_id,
           common::lower_align(buf_size, ObExternalSortConstant::ALIGN_SIZE);
       for (int i = 0; i < count_; i++) {
         macro_buffer_readers_[i].set_next_buf_size(first_buf_sizes[i]);
+        decode_func decoder = NULL;
+        switch (col_descs_[i].col_type_.get_type()) {
+        case ObObjType::ObInt32Type:
+        case ObObjType::ObIntType:
+        //   encoder = int_encode;
+        //   break;
+        // // DECIMAL
+        case ObObjType::ObNumberType:
+        case ObObjType::ObDateType:
+        case ObObjType::ObVarcharType:
+        case ObObjType::ObCharType:
+        default:
+          decoder = default_decode;
+          break;
+        }
+        decode_funcs_.push_back(decoder);
+        macro_buffer_readers_[i].set_decode_func(decoder);
       }
       expire_timestamp_ = expire_timestamp;
       is_inited_ = true;
@@ -1018,6 +1041,7 @@ template <typename T> void ObFragmentReaderV2<T>::reset() {
   expire_timestamp_ = 0;
   allocator_.reset();
   sample_allocator_.reset();
+  decode_funcs_.reset();
   // for (int i = 0; i < count_; i++) {
   //  macro_buffer_readers_[i].assign(0, 0, NULL);
   //}

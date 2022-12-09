@@ -1459,7 +1459,7 @@ public:
   void wait_switch_pop() {
     if (push_alloc != pop_alloc && push_size == pop_size) {
       dispatch_data_[pop_alloc_id].reset();
-      pop_alloc->reset();
+      pop_alloc->reuse();
       push_size = push_used;
       pop_size = 0;
       pop_index = 0;
@@ -1467,7 +1467,7 @@ public:
       pop_alloc = allocator_[pop_alloc_id];
     } else if (is_finished) {
       dispatch_data_[pop_alloc_id].reset();
-      pop_alloc->reset();
+      pop_alloc->reuse();
     }
   }
 

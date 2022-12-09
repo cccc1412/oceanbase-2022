@@ -12,25 +12,27 @@ namespace sql {
 class ObLoadDataDirectTask : public share::ObAsyncTask {
 public:
   ObLoadDataDirectTask(int64_t index, ObExecContext &ctx, ObLoadDataStmt &stmt,
-                       int64_t offset, int64_t end, int stage_process,
+                       int64_t offset, int64_t end, bool stage_process,
                        ObLoadDispatcher *dispatcher,
-                       DispatchSortQueue *sort_queue = nullptr,
                        ObLoadSSTableWriter *sstable_writer = nullptr)
       : index_(index), ctx_(ctx), stmt_(stmt), offset_(offset), end_(end),
         stage_process_(stage_process), dispatcher_(dispatcher),
-        sort_queue_(sort_queue), sstable_writer_(sstable_writer){};
+        sstable_writer_(sstable_writer){};
   virtual int process() override;
-  virtual int64_t get_deep_copy_size() const override {return sizeof(ObLoadDataDirectTask);};
-  virtual ObAsyncTask *deep_copy(char *buf, const int64_t buf_size) const override;
+  virtual int64_t get_deep_copy_size() const override {
+    return sizeof(ObLoadDataDirectTask);
+  };
+  virtual ObAsyncTask *deep_copy(char *buf,
+                                 const int64_t buf_size) const override;
+
 private:
   int64_t index_;
   ObExecContext &ctx_;
   ObLoadDataStmt &stmt_;
   int64_t offset_;
   int64_t end_;
-  int stage_process_;
+  bool stage_process_;
   ObLoadDispatcher *dispatcher_;
-  DispatchSortQueue * sort_queue_;
   ObLoadSSTableWriter *sstable_writer_;
   DISALLOW_COPY_AND_ASSIGN(ObLoadDataDirectTask);
 };

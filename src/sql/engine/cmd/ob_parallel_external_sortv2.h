@@ -30,6 +30,7 @@
 #include "storage/blocksstable/ob_tmp_file.h"
 #include <cstdint>
 #include <cstring>
+#include <thread>
 
 namespace oceanbase {
 namespace sql {
@@ -266,6 +267,7 @@ int ObFragmentWriterV2<T, C>::open(const int64_t buf_size,
                                    const int64_t dir_id, const int count,
                                    const ObArray<ObColDesc> &col_descs) {
   int ret = common::OB_SUCCESS;
+  allocator_.set_tenant_id(tenant_id);
   if (OB_UNLIKELY(is_inited_)) {
     ret = common::OB_INIT_TWICE;
     STORAGE_LOG(WARN, "ObFragmentWriter has already been inited", K(ret));
@@ -434,8 +436,8 @@ int ObFragmentWriterV2<T, C>::flush_buffer(int idx) {
                  compress_size))) {
     STORAGE_LOG(WARN, "fail to compress", K(compress_size), K(buf_size_));
   } else {
-    STORAGE_LOG(INFO,"[OB_COMPRESS_INFO]" ,"idx",idx,"compress_size", compress_size/1024, "origin_size",
-                macro_buffer_writers_[idx].size()/1024);
+    // STORAGE_LOG(INFO,"[OB_COMPRESS_INFO]" ,"idx",idx,"compress_size", compress_size/1024, "origin_size",
+    //             macro_buffer_writers_[idx].size()/1024);
     int64_t tmp_pos_ = 0;
     if (OB_FAIL(common::serialization::encode_i64(
             compress_bufs_[idx], ObExternalSortConstant::BUF_HEADER_LENGTH,
@@ -765,6 +767,7 @@ int ObFragmentReaderV2<T>::init(const int64_t *fds, const int64_t dir_id,
                                 const int64_t *first_buf_sizes, const int count,
                                 const ObArray<ObColDesc> &col_descs) {
   int ret = common::OB_SUCCESS;
+  allocator_.set_tenant_id(tenant_id);
   if (OB_UNLIKELY(is_inited_)) {
     ret = common::OB_INIT_TWICE;
     STORAGE_LOG(WARN, "ObFragmentReader has already been inited", K(ret));
@@ -1815,6 +1818,22 @@ public:
     dispatch_data_[1].reset();
   }
 
+  void debug_print(int i) {
+    auto print_func = [&, i]() {
+      while (!this->is_finished ||
+             this->get_pop_size() < this->get_push_size()) {
+        usleep(this->pop_sleep_time);
+        int64_t pop_size = this->get_pop_size() / (1LL << 20);
+        int64_t push_size = this->get_push_size() / (1LL << 20);
+        int64_t remain_size = push_size - pop_size;
+        LOG_INFO("[OB_LOAD_DEBUG]", "sort_queue", i, "pop_size", pop_size,
+                 "push_size", push_size, "remain_size", remain_size);
+      }
+    };
+    std::thread debug_thread(print_func);
+    debug_thread.detach();
+  }
+
   int64_t get_push_size() {
     if (push_alloc != pop_alloc)
       return push_size + push_used;
@@ -1835,6 +1854,8 @@ protected:
   // 之后其他各个线程在无锁的情况下对相应的 buf 进行初始化
   // 注意，pop_item 可能会取出未初始化的 buf 的情况
   void *alloc(int64_t size) {
+    while (push_used > buf_mem_limit)
+      usleep(push_sleep_time);
     LockGuard guard(lock);
     char *buf = NULL;
     if (size > buf_mem_limit) {

@@ -676,14 +676,14 @@ int ObLoadDispatcher::init(const ObTableSchema *table_schema) {
                                  allocator_.alloc(sizeof(ObArenaAllocator)))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(allocator1 = new (buf) ObArenaAllocator(
-                                 common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
+                                 common::ObNewModIds::OB_SQL_LOAD_DATA,
                                  common::OB_MALLOC_BIG_BLOCK_SIZE, MTL_ID()))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(buf =
                                  allocator_.alloc(sizeof(ObArenaAllocator)))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else if (OB_ISNULL(allocator2 = new (buf) ObArenaAllocator(
-                                 common::ObNewModIds::OB_ASYNC_EXTERNAL_SORTER,
+                                 common::ObNewModIds::OB_SQL_LOAD_DATA,
                                  common::OB_MALLOC_BIG_BLOCK_SIZE, MTL_ID()))) {
           LOG_WARN("fail to alloc memory", KR(ret));
         } else {
@@ -1393,45 +1393,35 @@ ObLoadDataDirectDemo::~ObLoadDataDirectDemo() {}
 int ObLoadDataDirectDemo::execute(ObExecContext &ctx,
                                   ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
-  if (stage_process_==0) {
+  if (stage_process_) {
     if (OB_FAIL(do_process())) {
-      LOG_WARN("fail to do process", KR(ret));
-    }
-  } else if (stage_process_ == 1) {
-    if (OB_FAIL(do_load1())) {
-      LOG_WARN("fail to do load1", KR(ret));
+      LOG_WARN("fail to do load", KR(ret));
     }
   } else {
-    if (OB_FAIL(do_load2())) {
-      LOG_WARN("fail to do load2", KR(ret));
+    if (OB_FAIL(do_load())) {
+      LOG_WARN("fail to do process", KR(ret));
     }
   }
   return ret;
 }
 
 int ObLoadDataDirectDemo::init(int64_t index, ObLoadDataStmt &load_stmt,
-                               int64_t offset, int64_t end, int stage_process,
+                               int64_t offset, int64_t end, bool stage_process,
                                ObLoadDispatcher *dispatcher,
-                               DispatchSortQueue *sort_queue,
                                ObLoadSSTableWriter *sstable_writer) {
   int ret = OB_SUCCESS;
   index_ = index;
   stage_process_ = stage_process;
   dispatcher_ = dispatcher;
-  sort_queue_ = sort_queue;
   sstable_writer_ = sstable_writer;
-  if (stage_process_==0) {
+  if (stage_process_) {
     if (OB_FAIL(inner_init_process(load_stmt))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo process", KR(ret));
     } else if (OB_FAIL(file_reader_.set_offset_end(offset, end))) {
       LOG_WARN("fail to set offset and end", KR(ret));
     }
-  } else if (stage_process_ == 1) {
-    if (OB_FAIL(inner_init_load1(load_stmt))) {
-      LOG_WARN("fail to init ObLoadDataDirectDemo load", KR(ret));
-    }
-  } else{
-    if (OB_FAIL(inner_init_load2(load_stmt))) {
+  } else {
+    if (OB_FAIL(inner_init_load(load_stmt))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo load", KR(ret));
     }
   }
@@ -1486,7 +1476,7 @@ int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt) {
   return ret;
 }
 
-int ObLoadDataDirectDemo::inner_init_load1(ObLoadDataStmt &load_stmt) {
+int ObLoadDataDirectDemo::inner_init_load(ObLoadDataStmt &load_stmt) {
   int ret = OB_SUCCESS;
   const ObLoadArgument &load_args = load_stmt.get_load_arguments();
   const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
@@ -1519,45 +1509,17 @@ int ObLoadDataDirectDemo::inner_init_load1(ObLoadDataStmt &load_stmt) {
                                        FILE_BUFFER_SIZE))) {
     LOG_WARN("fail to init external sort", KR(ret));
   }
-  // init sort_queue_ 
-  else {
-    external_sort_.set_dispatch_queue(dispatcher_->get_dispatch_queue(index_));
-  }
-  
-  return ret;
-}
-
-int ObLoadDataDirectDemo::inner_init_load2(ObLoadDataStmt &load_stmt) {
-  int ret = OB_SUCCESS;
-  const ObLoadArgument &load_args = load_stmt.get_load_arguments();
-  const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
-      load_stmt.get_field_or_var_list();
-  const uint64_t tenant_id = load_args.tenant_id_;
-  const uint64_t table_id = load_args.table_id_;
-  ObSchemaGetterGuard schema_guard;
-  const ObTableSchema *table_schema = nullptr;
-  if (OB_FAIL(
-          ObMultiVersionSchemaService::get_instance().get_tenant_schema_guard(
-              tenant_id, schema_guard))) {
-    LOG_WARN("fail to get tenant schema guard", KR(ret), K(tenant_id));
-  } else if (OB_FAIL(schema_guard.get_table_schema(tenant_id, table_id,
-                                                   table_schema))) {
-    LOG_WARN("fail to get table schema", KR(ret), K(tenant_id), K(table_id));
-  } else if (OB_ISNULL(table_schema)) {
-    ret = OB_TABLE_NOT_EXIST;
-    LOG_WARN("table not exist", KR(ret), K(tenant_id), K(table_id));
-  } else if (OB_UNLIKELY(table_schema->is_heap_table())) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_WARN("not support heap table", KR(ret));
-  }
-
   // init sstable_writer_
-  if (OB_FAIL(sstable_writer_->init(table_schema))) {
+  else if (OB_FAIL(sstable_writer_->init(table_schema))) {
     LOG_WARN("fail to init sstable writer", KR(ret));
   }
   // init macro_block_writer_
   else if (OB_FAIL(sstable_writer_->init_macro_block_writer(index_))) {
     LOG_WARN("failed to init macro block writer", K(ret));
+  }
+  // set memory sort allocator
+  else {
+    external_sort_.set_dispatch_queue(dispatcher_->get_dispatch_queue(index_));
   }
   return ret;
 }
@@ -1611,11 +1573,11 @@ int ObLoadDataDirectDemo::do_process() {
   return ret;
 }
 
-int ObLoadDataDirectDemo::do_load1() {
+int ObLoadDataDirectDemo::do_load() {
   int ret = OB_SUCCESS;
   const ObLoadDatumRow *datum_row = nullptr;
 
-  int count_ = 0;
+  int count1_ = 0,count2_=0;
   clock_t start, end;
   int64_t t;
 
@@ -1631,7 +1593,7 @@ int ObLoadDataDirectDemo::do_load1() {
     } else if (OB_FAIL(external_sort_.append_row_reuse(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
     } else {
-      count_++;
+      count1_++;
     }
   }
 
@@ -1641,40 +1603,13 @@ int ObLoadDataDirectDemo::do_load1() {
     }
   }
 
-  end=clock();
-  t=(end-start)/CLOCKS_PER_SEC;
+  end = clock();
+  t = (end - start) / CLOCKS_PER_SEC;
   LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "external sort time", t);
-  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load1 data num", count_);
+  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load data num1", count1_);
 
   while (OB_SUCC(ret)) {
     if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
-      if (OB_UNLIKELY(OB_ITER_END != ret)) {
-        LOG_WARN("fail to get next row", KR(ret));
-      } else {
-        sort_queue_->finish();
-        ret = OB_SUCCESS;
-        break;
-      }
-    } else if (OB_FAIL(sort_queue_->push_item(datum_row))) {
-      LOG_WARN("fail to append row", KR(ret));
-    }
-  }
-
-  return ret;
-}
-
-int ObLoadDataDirectDemo::do_load2() {
-  int ret = OB_SUCCESS;
-  const ObLoadDatumRow *datum_row = nullptr;
-
-  int count_ = 0;
-  clock_t start, end;
-  int64_t t;
-
-  start = clock();
-
-  while (OB_SUCC(ret)) {
-    if (OB_FAIL(sort_queue_->pop_item(datum_row))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to get next row", KR(ret));
       } else {
@@ -1683,26 +1618,21 @@ int ObLoadDataDirectDemo::do_load2() {
       }
     } else if (OB_FAIL(sstable_writer_->append_row(*datum_row))) {
       LOG_WARN("fail to append row", KR(ret));
-      LOG_WARN("[OB_LOAD_WARN]", "thread", index_, "count", count_);
     } else {
-      count_++;
-      // LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "count", count_, K(*datum_row));
-      sort_queue_->wait_switch_pop();
+      count2_++;
     }
   }
 
   if (OB_SUCC(ret)) {
     if (OB_FAIL(sstable_writer_->close())) {
       LOG_WARN("fail to close sstable writer", KR(ret));
-    } else {
-      sort_queue_->reset();
     }
   }
 
   end = clock();
   t = (end - start) / CLOCKS_PER_SEC;
   LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "sstable time", t);
-  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load2 data num", count_);
+  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load data num2", count2_);
 
   return ret;
 }

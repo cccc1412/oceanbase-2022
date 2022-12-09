@@ -393,12 +393,15 @@ public:
   int read_item(T &item);
   int deserialize_header();
   void assign(const int64_t buf_pos, const int64_t buf_cap, const char *buf);
-  TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
+  int init_decompress_buffer(common::ObArenaAllocator &allocator,
+                             const int64_t buf_size);
+      TO_STRING_KV(KP(buf_), K(buf_pos_), K(buf_len_), K(buf_cap_));
 
 private:
   common::ObLZ4Compressor191 compressor_;
   const char *buf_;
   char *decompress_buf_;
+  int64_t decompress_buf_len_;
   int64_t buf_pos_;
   int64_t buf_len_;
   int64_t buf_cap_;
@@ -406,14 +409,24 @@ private:
 
 template <typename T>
 ObMacroBufferReader<T>::ObMacroBufferReader()
-    : buf_(NULL), decompress_buf_(NULL), buf_pos_(0), buf_len_(0), buf_cap_(0) {
-  decompress_buf_ = new char[3 * 2LL << 20];
-}
+    : buf_(NULL), decompress_buf_(NULL), buf_pos_(0), buf_len_(0), buf_cap_(0)
+{}
 
-template <typename T> ObMacroBufferReader<T>::~ObMacroBufferReader() {
-  if (decompress_buf_ != nullptr) {
-    delete decompress_buf_;
+template <typename T> ObMacroBufferReader<T>::~ObMacroBufferReader() {}
+
+template <typename T>
+int ObMacroBufferReader<T>::init_decompress_buffer(
+    common::ObArenaAllocator &allocator, const int64_t buf_size) {
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(decompress_buf_)) {
+    if (OB_ISNULL(decompress_buf_ =
+                      static_cast<char *>(allocator.alloc(buf_size)))) {
+      STORAGE_LOG(WARN, "fail to alloc memory", K(ret), K(buf_size));
+    } else {
+      decompress_buf_len_ = buf_size;
+    }
   }
+  return ret;
 }
 
 template <typename T> int ObMacroBufferReader<T>::read_item(T &item) {
@@ -423,8 +436,8 @@ template <typename T> int ObMacroBufferReader<T>::read_item(T &item) {
       STORAGE_LOG(WARN, "fail to deserialize header");
     }
     int64_t decompress_size = 0;
-    compressor_.decompress(buf_ + buf_pos_, buf_len_ - 8, decompress_buf_ + 8,
-                           3 * 2LL << 20, decompress_size);
+    compressor_.decompress(buf_ + 8, buf_len_ - 8, decompress_buf_ + 8,
+                           decompress_buf_len_-8, decompress_size);
     memcpy(decompress_buf_, buf_, 8);
     buf_ = decompress_buf_;
     buf_len_ = decompress_size + 8;
@@ -548,9 +561,7 @@ int ObFragmentReaderV2<T>::init(
       dir_id_ = dir_id;
       tenant_id_ = tenant_id;
       is_first_prefetch_ = true;
-      buf_size_ = common::lower_align(
-                      buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size()) /
-                  3;
+      buf_size_ = common::lower_align(buf_size, OB_SERVER_BLOCK_MGR.get_macro_block_size());
       is_inited_ = true;
     }
   }
@@ -575,16 +586,22 @@ template <typename T> int ObFragmentReaderV2<T>::prefetch() {
     STORAGE_LOG(WARN, "ObFragmentReaderV2 has not been inited", K(ret));
   } else {
     if (nullptr == buf_) {
-      if (OB_ISNULL(buf_ = static_cast<char *>(allocator_.alloc(buf_size_)))) {
+      if (OB_ISNULL(buf_ = static_cast<char *>(allocator_.alloc(buf_size_/3)))) {
         ret = common::OB_ALLOCATE_MEMORY_FAILED;
         STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
+      }
+    }
+    if (OB_UNLIKELY(is_first_prefetch_)) {
+      if (OB_FAIL(macro_buffer_reader_.init_decompress_buffer(
+              allocator_, buf_size_ +buf_size_/255+ 32))) {
+        STORAGE_LOG(WARN, "fail to init decompress buffer", K(ret));
       }
     }
     if (OB_SUCC(ret)) {
       blocksstable::ObTmpFileIOInfo io_info;
       io_info.fd_ = fd_;
       io_info.dir_id_ = dir_id_;
-      io_info.size_ = buf_size_;
+      io_info.size_ = buf_size_/3;
       io_info.tenant_id_ = tenant_id_;
       io_info.buf_ = buf_;
       io_info.io_desc_.set_category(common::ObIOCategory::SYS_IO);
@@ -622,7 +639,7 @@ template <typename T> int ObFragmentReaderV2<T>::wait() {
   } else if (OB_FAIL(file_io_handles_[wait_cursor].wait(timeout_ms))) {
     STORAGE_LOG(WARN, "fail to wait io finish", K(ret), K(timeout_ms));
   } else {
-    macro_buffer_reader_.assign(0, buf_size_,
+    macro_buffer_reader_.assign(0, buf_size_/3,
                                 file_io_handles_[wait_cursor].get_buffer());
   }
   return ret;

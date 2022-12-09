@@ -142,11 +142,14 @@ ObMacroBufferWriter<T>::ObMacroBufferWriter()
 template <typename T> ObMacroBufferWriter<T>::~ObMacroBufferWriter() {}
 
 template <typename T> int ObMacroBufferWriter<T>::write_item(const T &item) {
+  // 保留 32 KB，避免编码后长度比原来长，内存越界的情况
+  static const int64_t reserve_size= (1LL<<10)*32;
   int ret = common::OB_SUCCESS;
+
   const int64_t estimate_size = item.get_serialize_size();
   // 可能存在编码后的长度比原本长的情况，甚至超过 buf 容量
   // 一般假设不会发生
-  if (estimate_size + buf_pos_ > buf_cap_ / 2) {
+  if (estimate_size + buf_pos_ + reserve_size > buf_cap_) {
     ret = OB_EAGAIN;
   } else if (OB_FAIL(encoder_(item, buf_, buf_pos_, buf_cap_))) {
     STORAGE_LOG(WARN, "fail to push back", K(ret));
@@ -431,6 +434,8 @@ int ObFragmentWriterV2<T, C>::flush_buffer(int idx) {
                  compress_size))) {
     STORAGE_LOG(WARN, "fail to compress", K(compress_size), K(buf_size_));
   } else {
+    STORAGE_LOG(INFO,"[OB_COMPRESS_INFO]" ,"idx",idx,"compress_size", compress_size/1024, "origin_size",
+                macro_buffer_writers_[idx].size()/1024);
     int64_t tmp_pos_ = 0;
     if (OB_FAIL(common::serialization::encode_i64(
             compress_bufs_[idx], ObExternalSortConstant::BUF_HEADER_LENGTH,
@@ -845,7 +850,7 @@ template <typename T> int ObFragmentReaderV2<T>::prefetch(int idx) {
   } else {
     if (nullptr == bufs_[idx]) {
       if (OB_ISNULL(bufs_[idx] =
-                        static_cast<char *>(allocator_.alloc(buf_size_)))) {
+                        static_cast<char *>(allocator_.alloc(buf_size_/2)))) {
         ret = common::OB_ALLOCATE_MEMORY_FAILED;
         STORAGE_LOG(WARN, "fail to allocate memory", K(ret));
       }
@@ -906,7 +911,7 @@ template <typename T> int ObFragmentReaderV2<T>::wait(int idx) {
     STORAGE_LOG(WARN, "fail to wait io finish", K(ret), K(timeout_ms));
   } else {
     macro_buffer_readers_[idx].assign(
-        0, buf_size_, file_io_handles_[idx][wait_cursor].get_buffer());
+        0, buf_size_/2, file_io_handles_[idx][wait_cursor].get_buffer());
   }
   return ret;
 }
@@ -929,7 +934,7 @@ template <typename T> int ObFragmentReaderV2<T>::wait_all() {
       STORAGE_LOG(WARN, "fail to wait io finish", K(ret), K(timeout_ms));
     } else {
       macro_buffer_readers_[i].assign(
-          0, buf_size_, file_io_handles_[i][wait_cursor].get_buffer());
+          0, buf_size_/2, file_io_handles_[i][wait_cursor].get_buffer());
     }
   }
   return ret;
@@ -1275,6 +1280,7 @@ int ObFragmentMerge<T, Compare>::heap_get_next_item(const T *&item) {
       } else if (OB_FAIL(compare_.get_error_code())) {
         STORAGE_LOG(WARN, "fail to compare items", K(ret));
       } else {
+        iter->clean_up();
         STORAGE_LOG(DEBUG, "pop a heap item");
       }
     } else if (NULL == heap_item.item_) {
@@ -1796,6 +1802,9 @@ public:
       pop_index = 0;
       pop_alloc_id = (pop_alloc_id + 1) % 2;
       pop_alloc = allocator_[pop_alloc_id];
+    } else if (is_finished) {
+      dispatch_data_[pop_alloc_id].reset();
+      pop_alloc->reset();
     }
   }
 

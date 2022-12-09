@@ -22,7 +22,7 @@
 
 #include <stdlib.h>
 
-// #define LOAD_DEBUG_PRINT
+#define LOAD_DEBUG_PRINT
 
 namespace oceanbase {
 namespace sql {

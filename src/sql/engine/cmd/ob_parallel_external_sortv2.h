@@ -1283,7 +1283,7 @@ int ObFragmentMerge<T, Compare>::heap_get_next_item(const T *&item) {
       } else if (OB_FAIL(compare_.get_error_code())) {
         STORAGE_LOG(WARN, "fail to compare items", K(ret));
       } else {
-        iter->clean_up();
+        // iter->clean_up();
         STORAGE_LOG(DEBUG, "pop a heap item");
       }
     } else if (NULL == heap_item.item_) {
@@ -1818,21 +1818,21 @@ public:
     dispatch_data_[1].reset();
   }
 
-  void debug_print(int i) {
-    auto print_func = [&, i]() {
-      while (!this->is_finished ||
-             this->get_pop_size() < this->get_push_size()) {
-        usleep(this->pop_sleep_time);
-        int64_t pop_size = this->get_pop_size() / (1LL << 20);
-        int64_t push_size = this->get_push_size() / (1LL << 20);
-        int64_t remain_size = push_size - pop_size;
-        LOG_INFO("[OB_LOAD_DEBUG]", "sort_queue", i, "pop_size", pop_size,
-                 "push_size", push_size, "remain_size", remain_size);
-      }
-    };
-    std::thread debug_thread(print_func);
-    debug_thread.detach();
-  }
+  // void debug_print(int i) {
+  //   auto print_func = [&, i]() {
+  //     while (!this->is_finished ||
+  //            this->get_pop_size() < this->get_push_size()) {
+  //       usleep(this->pop_sleep_time);
+  //       int64_t pop_size = this->get_pop_size() / (1LL << 20);
+  //       int64_t push_size = this->get_push_size() / (1LL << 20);
+  //       int64_t remain_size = push_size - pop_size;
+  //       LOG_INFO("[OB_LOAD_DEBUG]", "sort_queue", i, "pop_size", pop_size,
+  //                "push_size", push_size, "remain_size", remain_size);
+  //     }
+  //   };
+  //   std::thread debug_thread(print_func);
+  //   debug_thread.detach();
+  // }
 
   int64_t get_push_size() {
     if (push_alloc != pop_alloc)

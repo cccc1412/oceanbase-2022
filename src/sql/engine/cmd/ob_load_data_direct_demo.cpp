@@ -1605,8 +1605,8 @@ int ObLoadDataDirectDemo::do_load() {
 
   end = clock();
   t = (end - start) / CLOCKS_PER_SEC;
-  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "external sort time", t);
-  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load data num1", count1_);
+  LOG_INFO("[OB_LOAD_DEBUG]", "thread", index_, "external sort time", t);
+  LOG_INFO("[OB_LOAD_DEBUG]", "thread", index_, "load data num1", count1_);
 
   while (OB_SUCC(ret)) {
     if (OB_FAIL(external_sort_.get_next_row(datum_row))) {
@@ -1631,8 +1631,8 @@ int ObLoadDataDirectDemo::do_load() {
 
   end = clock();
   t = (end - start) / CLOCKS_PER_SEC;
-  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "sstable time", t);
-  LOG_INFO("[OB_LOAD_INFO]", "thread", index_, "load data num2", count2_);
+  LOG_INFO("[OB_LOAD_DEBUG]", "thread", index_, "sstable time", t);
+  LOG_INFO("[OB_LOAD_DEBUG]", "thread", index_, "load data num2", count2_);
 
   return ret;
 }

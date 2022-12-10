@@ -1467,7 +1467,8 @@ public:
       pop_alloc = allocator_[pop_alloc_id];
     } else if (is_finished) {
       dispatch_data_[pop_alloc_id].reset();
-      pop_alloc->reuse();
+      allocator_[0]->reset();
+      allocator_[1]->reset();
     }
   }
 

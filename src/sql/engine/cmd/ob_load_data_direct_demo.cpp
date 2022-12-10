@@ -312,6 +312,8 @@ int ObLoadDatumRow::deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
       }
     }
     if (OB_SUCC(ret)) {
+      value.id0 = src.value.id0;
+      value.id1 = src.value.id1;
       capacity_ = datum_cnt;
       count_ = datum_cnt;
       datums_ = datums;
@@ -356,6 +358,8 @@ OB_DEF_DESERIALIZE(ObLoadDatumRow) {
     } else {
       OB_UNIS_DECODE_ARRAY(datums_, count);
       count_ = count;
+      value.id0 = datums_[0].get_int();
+      value.id1 = datums_[1].get_int32();
     }
   }
   return ret;
@@ -396,37 +400,7 @@ int ObLoadDatumRowCompare::init(int64_t rowkey_column_num,
 
 bool ObLoadDatumRowCompare::operator()(const ObLoadDatumRow *lhs,
                                        const ObLoadDatumRow *rhs) {
-  int ret = OB_SUCCESS;
-  int cmp_ret = 0;
-  if (IS_NOT_INIT) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("ObDirectLoadDatumRowCompare not init", KR(ret), KP(this));
-  } else if (OB_ISNULL(lhs) || OB_ISNULL(rhs) ||
-             OB_UNLIKELY(!lhs->is_valid() || !rhs->is_valid())) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("invalid args", KR(ret), KPC(lhs), KPC(rhs));
-  } else if (OB_UNLIKELY(lhs->count_ < rowkey_column_num_ ||
-                         rhs->count_ < rowkey_column_num_)) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("unexpected column count", KR(ret), KPC(lhs), KPC(rhs),
-             K_(rowkey_column_num));
-  } else {
-    if (OB_FAIL(lhs_rowkey_.assign(lhs->datums_, rowkey_column_num_))) {
-      LOG_WARN("fail to assign datum rowkey", KR(ret), K(lhs),
-               K_(rowkey_column_num));
-    } else if (OB_FAIL(rhs_rowkey_.assign(rhs->datums_, rowkey_column_num_))) {
-      LOG_WARN("fail to assign datum rowkey", KR(ret), K(rhs),
-               K_(rowkey_column_num));
-    } else if (OB_FAIL(
-                   lhs_rowkey_.compare(rhs_rowkey_, *datum_utils_, cmp_ret))) {
-      LOG_WARN("fail to compare rowkey", KR(ret), K(rhs_rowkey_),
-               K(rhs_rowkey_), KP(datum_utils_));
-    }
-  }
-  if (OB_FAIL(ret)) {
-    result_code_ = ret;
-  }
-  return cmp_ret < 0;
+  return lhs->value < rhs->value;
 }
 
 /**
@@ -543,6 +517,8 @@ int ObLoadRowCaster::get_casted_row(const ObNewRow &new_row,
       }
     }
     if (OB_SUCC(ret)) {
+      datum_row_.value.id0 = datum_row_.datums_[0].get_int();
+      datum_row_.value.id1 = datum_row_.datums_[1].get_int32();
       datum_row = &datum_row_;
     }
   }
@@ -1563,7 +1539,7 @@ int ObLoadDataDirectDemo::do_load() {
         break;
       }
     } else if (OB_FAIL(sstable_writer_->append_row(*datum_row))) {
-      LOG_WARN("fail to append row", KR(ret));
+      LOG_WARN("fail to append row", KR(ret), K(*datum_row));
     }
   }
 

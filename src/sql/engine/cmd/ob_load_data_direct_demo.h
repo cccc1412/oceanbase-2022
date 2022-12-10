@@ -9,8 +9,9 @@
 #include "sql/engine/cmd/ob_load_data_impl.h"
 #include "sql/engine/cmd/ob_load_data_parser.h"
 #include "storage/blocksstable/ob_index_block_builder.h"
-#include "storage/ob_parallel_external_sort.h"
+// #include "storage/ob_parallel_external_sort.h"
 #include "storage/tx_storage/ob_ls_handle.h"
+#include "ob_parallel_sort.hpp"
 
 #include <atomic>
 #include <thread>
@@ -107,6 +108,8 @@ public:
   int deep_copy(const ObLoadDatumRow &src, char *buf, int64_t len,
                 int64_t &pos);
   OB_INLINE bool is_valid() const { return count_ > 0 && nullptr != datums_; }
+  radix_value value;
+  int radix_id;
   DECLARE_TO_STRING;
 
 public:
@@ -168,7 +171,7 @@ private:
 };
 
 class ObLoadExternalSort {
-  typedef storage::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
+  typedef sql::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
 public:
   ObLoadExternalSort();
   ~ObLoadExternalSort();
@@ -186,7 +189,7 @@ private:
   common::ObArenaAllocator allocator_;
   blocksstable::ObStorageDatumUtils datum_utils_;
   ObLoadDatumRowCompare compare_;
-  storage::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
+  sql::ObExternalSort<ObLoadDatumRow, ObLoadDatumRowCompare> external_sort_;
   bool is_closed_;
   bool is_inited_;
 };
@@ -233,7 +236,7 @@ class ObLoadDispatcher {
   typedef common::ObSpinLock Lock;
   typedef lib::ObLockGuard<Lock> LockGuard;
   typedef common::ObVector<ObLoadDatumRow *> LoadDatumRowVector;
-  typedef storage::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
+  typedef sql::DispatchQueue<ObLoadDatumRow> ObLoadDispatchQueue;
 public:
   // thread_num 指的是向 ObLoadDispatcher 提供数据的线程数量
   // dispatch_num 指的是 ObLoadDispatcher 分发到外排桶的数量

@@ -57,7 +57,7 @@ int ObLoadDataExecutor::execute(ObExecContext &ctx, ObLoadDataStmt &stmt) {
     }
   }
   if (OB_SUCC(ret)) {
-    dispatcher.debug_print();
+    //dispatcher.debug_print();
     if (OB_FAIL(
             do_execute(ctx, stmt, dispatcher, sort_queues, sstable_writer))) {
       LOG_WARN("do process fail", KR(ret));
@@ -85,9 +85,9 @@ int ObLoadDataExecutor::do_execute(ObExecContext &ctx, ObLoadDataStmt &stmt,
     process_async_tq.wait_task();
     process_async_tq.stop();
     process_async_tq.wait();
-    for (int i = 0; i < LOAD_THREAD_NUM; i++) {
-      sort_queues[i].debug_print(i);
-    }
+    //for (int i = 0; i < LOAD_THREAD_NUM; i++) {
+    //  sort_queues[i].debug_print(i);
+    //}
     if (OB_FAIL(
             do_load2(load_async_tq2, ctx, stmt, sort_queues, sstable_writer))) {
       LOG_WARN("do load2 fail", KR(ret));

@@ -803,7 +803,7 @@ int ObLoadDispatcher::do_stat() {
           LOG_WARN("fail to deep copy item", K(ret));
         } else {
           dispatch_point_.push_back(new_item);
-          LOG_INFO("new dispatch point", KP(new_item));
+          //LOG_INFO("new dispatch point", KP(new_item));
         }
       }
     }

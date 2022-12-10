@@ -7,6 +7,7 @@
 #include "share/tablet/ob_tablet_to_ls_operator.h"
 #include "storage/tablet/ob_tablet_create_delete_helper.h"
 #include "storage/tx_storage/ob_ls_service.h"
+#include <fcntl.h>
 namespace oceanbase {
 namespace sql {
 using namespace blocksstable;
@@ -29,7 +30,7 @@ thread_local blocksstable::ObDatumRowkey ObLoadDatumRowCompare::rhs_rowkey_;
  */
 
 ObLoadDataBuffer::ObLoadDataBuffer()
-    : allocator_(ObModIds::OB_SQL_LOAD_DATA), data_(nullptr), begin_pos_(0),
+    : buf_(nullptr), begin_pos_(0),
       end_pos_(0), capacity_(0) {}
 
 ObLoadDataBuffer::~ObLoadDataBuffer() { reset(); }
@@ -40,8 +41,7 @@ void ObLoadDataBuffer::reuse() {
 }
 
 void ObLoadDataBuffer::reset() {
-  allocator_.reset();
-  data_ = nullptr;
+  buf_=nullptr;
   begin_pos_ = 0;
   end_pos_ = 0;
   capacity_ = 0;
@@ -49,53 +49,60 @@ void ObLoadDataBuffer::reset() {
 
 int ObLoadDataBuffer::create(int64_t capacity) {
   int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(nullptr != data_)) {
-    ret = OB_INIT_TWICE;
-    LOG_WARN("ObLoadDataBuffer init twice", KR(ret), KP(this));
-  } else if (OB_UNLIKELY(capacity <= 0)) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("invalid args", KR(ret), K(capacity));
-  } else {
-    allocator_.set_tenant_id(MTL_ID());
-    if (OB_ISNULL(data_ = static_cast<char *>(allocator_.alloc(capacity)))) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-      LOG_WARN("fail to alloc memory", KR(ret), K(capacity));
-    } else {
-      capacity_ = capacity;
-    }
-  }
+  capacity_ = capacity;
   return ret;
 }
 
-int ObLoadDataBuffer::squash() {
-  int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(nullptr == data_)) {
-    ret = OB_NOT_INIT;
-    LOG_WARN("ObLoadDataBuffer not init", KR(ret), KP(this));
-  } else {
-    const int64_t data_size = get_data_size();
-    if (data_size > 0) {
-      MEMMOVE(data_, data_ + begin_pos_, data_size);
-    }
-    begin_pos_ = 0;
-    end_pos_ = data_size;
-  }
-  return ret;
-}
+// int ObLoadDataBuffer::squash() {
+//   int ret = OB_SUCCESS;
+//   if (OB_UNLIKELY(nullptr == buf_)) {
+//     ret = OB_NOT_INIT;
+//     LOG_WARN("ObLoadDataBuffer not init", KR(ret), KP(this));
+//   } else {
+//     const int64_t data_size = get_data_size();
+//     if (data_size > 0) {
+//       MEMMOVE(buf_, buf_ + begin_pos_, data_size);
+//     }
+//     begin_pos_ = 0;
+//     end_pos_ = data_size;
+//   }
+//   return ret;
+// }
 
 /**
  * ObLoadSequentialFileReader
  */
 
 ObLoadSequentialFileReader::ObLoadSequentialFileReader()
-    : offset_(0), is_read_end_(false) {}
+    : is_opened_(false), expire_timestamp_(0), fd_(-1),
+      tenant_id_(common::OB_INVALID_ID), offset_(0), end_(0), buf_size_(0),
+      buf_(NULL), read_size_(0), is_prefetch_end_(false), handle_cursor_(0),
+      allocator_(ObModIds::OB_SQL_LOAD_DATA) {}
 
 ObLoadSequentialFileReader::~ObLoadSequentialFileReader() {}
 
-int ObLoadSequentialFileReader::open(const ObString &filepath) {
+int ObLoadSequentialFileReader::open(const ObString &filepath,
+                                     const int64_t buf_size, int64_t offset,
+                                     int64_t end) {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(file_reader_.open(filepath, false))) {
+  if (-1==(fd_ = ::open(filepath.ptr(), O_RDONLY))) {
     LOG_WARN("fail to open file", KR(ret));
+  } else {
+    tenant_id_ = MTL_ID();
+    allocator_.set_tenant_id(tenant_id_);
+    buf_size_ = buf_size;
+    is_opened_ = true;
+    // if (OB_ISNULL(buf_ = static_cast<char *>(allocator_.alloc(buf_size)))) {
+    //   ret = OB_ALLOCATE_MEMORY_FAILED;
+    //   LOG_WARN("fail to alloc memory", KR(ret), K(buf_size));
+    // } else 
+    if (OB_FAIL(set_offset_end(offset, end))) {
+      is_opened_ = false;
+      LOG_WARN("fail to set offset and end", KR(ret));
+    } else if (OB_FAIL(prefetch())) {
+      is_opened_ = false;
+      LOG_WARN("fail to prefetch", KR(ret));
+    }
   }
   return ret;
 }
@@ -105,12 +112,12 @@ int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
 
   int64_t read_size = 0;
   // memset(buf_, 0, MAX_RECORD_SIZE);
-  if (OB_FAIL(file_reader_.pread(buf_, MAX_RECORD_SIZE, end, read_size))) {
+  if (-1==(read_size=pread(fd_, temp_buf_, MAX_RECORD_SIZE, end))) {
     LOG_WARN("fail to do pread", KR(ret));
     goto out;
   } else {
     int64_t i = 0;
-    while (i < read_size && buf_[i] != '\n') {
+    while (i < read_size && temp_buf_[i] != '\n') {
       i++;
       end++;
     }
@@ -120,12 +127,12 @@ int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
   if (offset != 0) {
     read_size = 0;
     // memset(buf_, 0, MAX_RECORD_SIZE);
-    if (OB_FAIL(file_reader_.pread(buf_, MAX_RECORD_SIZE, offset, read_size))) {
+    if (-1 == (read_size=pread(fd_, temp_buf_, MAX_RECORD_SIZE, offset))) {
       LOG_WARN("fail to do pread", KR(ret));
       goto out;
     } else {
       int64_t i = 0;
-      while (i < read_size && buf_[i] != '\n') {
+      while (i < read_size && temp_buf_[i] != '\n') {
         i++;
         offset++;
       }
@@ -139,27 +146,98 @@ out:
   return ret;
 }
 
+int ObLoadSequentialFileReader::pipeline() {
+  int ret = common::OB_SUCCESS;
+  if (OB_UNLIKELY(!is_opened_)) {
+    ret = common::OB_NOT_INIT;
+    LOG_WARN("ObLoadSequentialFileReader has not been opened", K(ret));
+  } else if (OB_FAIL(wait())) {
+    if (common::OB_ITER_END != ret) {
+      LOG_WARN("fail to wait io finish", KR(ret));
+    }
+  } else if (OB_FAIL(prefetch())) {
+    LOG_WARN("fail to prefetch data", KR(ret));
+  }
+  return ret;
+}
+
+int ObLoadSequentialFileReader::prefetch() {
+  int ret = common::OB_SUCCESS;
+  if (OB_UNLIKELY(!is_opened_)) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("ObLoadSequentialFileReader has not been opened", KR(ret));
+  } else {
+    if (OB_SUCC(ret)) {
+
+      common::ObIOInfo io_info;
+      io_info.fd_.first_id_ = common::ObIOFd::NORMAL_FILE_ID;
+      io_info.fd_.second_id_ = fd_;
+      io_info.tenant_id_ = tenant_id_;
+      io_info.offset_ = offset_;
+      io_info.size_ = std::min(buf_size_, end_ - offset_);
+      io_info.buf_ = buf_;
+      io_info.flag_.set_mode(ObIOMode::READ);
+      io_info.flag_.set_category(ObIOCategory::USER_IO);
+      io_info.flag_.set_wait_event(ObWaitEventIds::DB_FILE_DATA_READ);
+      // io_info.flag_.set_unlimited(true);
+
+      if (io_info.size_ == 0) {
+        is_prefetch_end_ = true;
+      } else if (OB_FAIL(ObIOManager::get_instance().aio_read(
+              io_info, file_io_handles_[handle_cursor_ % MAX_HANDLE_COUNT]))) {
+        if (common::OB_ITER_END != ret) {
+          LOG_WARN("fail to do aio read from macro file", KR(ret), K(io_info));
+        } else {
+          is_prefetch_end_ = true;
+          ret = OB_SUCCESS;
+        }
+      } else{
+        ++handle_cursor_;
+      }
+    }
+  }
+  return ret;
+}
+
+int ObLoadSequentialFileReader::wait() {
+  int ret = common::OB_SUCCESS;
+  const int64_t wait_cursor = (handle_cursor_ + 1) % MAX_HANDLE_COUNT;
+  int64_t timeout_ms=0;
+  if (OB_UNLIKELY(!is_opened_)) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("ObLoadSequentialFileReader has not been opened", KR(ret));
+  } else if (is_prefetch_end_) {
+    ret = common::OB_ITER_END;
+  } else if (OB_FAIL(ObExternalSortConstant::get_io_timeout_ms(
+                 expire_timestamp_, timeout_ms))) {
+    LOG_WARN("fail to get io timeout ms", K(ret), K(expire_timestamp_),
+             K(timeout_ms));
+  } else if (OB_FAIL(file_io_handles_[wait_cursor].wait(timeout_ms))) {
+    LOG_WARN("fail to wait io finish", KR(ret));
+  } else {
+    buf_=file_io_handles_[wait_cursor].get_buffer();
+    int64_t read_size = file_io_handles_[wait_cursor].get_data_size();
+    while (buf_[read_size - 1] != '\n')
+      read_size--;
+    offset_ += read_size;
+    read_size_ = read_size;
+  }
+  return ret;
+}
+
 int ObLoadSequentialFileReader::read_next_buffer(ObLoadDataBuffer &buffer) {
   int ret = OB_SUCCESS;
-  if (OB_UNLIKELY(!file_reader_.is_opened())) {
-    ret = OB_FILE_NOT_OPENED;
-    LOG_WARN("file not opened", KR(ret));
-  } else if (is_read_end_) {
+  if (OB_UNLIKELY(!is_opened_)) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("ObLoadSequentialFileReader has not been opened", KR(ret));
+  } else if (is_prefetch_end_) {
     ret = OB_ITER_END;
-  } else if (OB_LIKELY(buffer.get_remain_size() > 0)) {
-    const int64_t buffer_remain_size = buffer.get_remain_size();
-    const int64_t read_size_ = min(buffer_remain_size, end_ - offset_);
-    int64_t read_size = 0;
-    if (OB_FAIL(
-            file_reader_.pread(buffer.end(), read_size_, offset_, read_size))) {
-      LOG_WARN("fail to do pread", KR(ret));
-    } else if (read_size == 0) {
-      is_read_end_ = true;
-      ret = OB_ITER_END;
-    } else {
-      offset_ += read_size;
-      buffer.produce(read_size);
+  } else if (OB_FAIL(pipeline())) {
+    if (common::OB_ITER_END != ret) {
+      LOG_WARN("fail to pipeline data", KR(ret));
     }
+  } else {
+    buffer.assign(0, read_size_, buf_);
   }
   return ret;
 }
@@ -1340,10 +1418,8 @@ int ObLoadDataDirectDemo::init(int64_t index, ObLoadDataStmt &load_stmt,
   dispatcher_ = dispatcher;
   sstable_writer_ = sstable_writer;
   if (stage_process_) {
-    if (OB_FAIL(inner_init_process(load_stmt))) {
+    if (OB_FAIL(inner_init_process(load_stmt, offset,end))) {
       LOG_WARN("fail to init ObLoadDataDirectDemo process", KR(ret));
-    } else if (OB_FAIL(file_reader_.set_offset_end(offset, end))) {
-      LOG_WARN("fail to set offset and end", KR(ret));
     }
   } else {
     if (OB_FAIL(inner_init_load(load_stmt))) {
@@ -1353,7 +1429,8 @@ int ObLoadDataDirectDemo::init(int64_t index, ObLoadDataStmt &load_stmt,
   return ret;
 }
 
-int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt) {
+int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt,
+                                             int64_t offset, int64_t end) {
   int ret = OB_SUCCESS;
   const ObLoadArgument &load_args = load_stmt.get_load_arguments();
   const ObIArray<ObLoadDataStmt::FieldOrVarStruct> &field_or_var_list =
@@ -1383,11 +1460,13 @@ int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to init csv parser", KR(ret));
   }
   // init file_reader_
-  else if (OB_FAIL(file_reader_.open(load_args.full_file_path_))) {
+  else if (OB_FAIL(file_reader_.open(load_args.full_file_path_,
+                                     LOAD_BUFFER_SIZE, offset,
+                                     end))) {
     LOG_WARN("fail to open file", KR(ret), K(load_args.full_file_path_));
   }
   // init buffer_
-  else if (OB_FAIL(buffer_.create(FILE_BUFFER_SIZE))) {
+  else if (OB_FAIL(buffer_.create(LOAD_BUFFER_SIZE))) {
     LOG_WARN("fail to create buffer", KR(ret));
   }
   // init row_caster_
@@ -1454,9 +1533,7 @@ int ObLoadDataDirectDemo::do_process() {
   const ObNewRow *new_row = nullptr;
   const ObLoadDatumRow *datum_row = nullptr;
   while (OB_SUCC(ret)) {
-    if (OB_FAIL(buffer_.squash())) {
-      LOG_WARN("fail to squash buffer", KR(ret));
-    } else if (OB_FAIL(file_reader_.read_next_buffer(buffer_))) {
+    if (OB_FAIL(file_reader_.read_next_buffer(buffer_))) {
       if (OB_UNLIKELY(OB_ITER_END != ret)) {
         LOG_WARN("fail to read next buffer", KR(ret));
       } else {

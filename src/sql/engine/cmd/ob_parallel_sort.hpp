@@ -130,12 +130,12 @@ void radix_sort(common::ObVector<T *> &list, Compare compare, int64_t min_id0, i
     std::sort(list.begin(), list.end(), compare);
 
     // DEBUG
-    if(min_id0 < 0 || min_id1<0){
-      for (int i = 0; i < size; i++) {
-        STORAGE_LOG(INFO, "[OB_SORT_INFO]", "id0", list[i]->value.id0, "id1",
-                    list[i]->value.id1);
-      }
-    }
+    // if(min_id0 < 0 || min_id1<0){
+    //   for (int i = 0; i < size; i++) {
+    //     STORAGE_LOG(INFO, "[OB_SORT_INFO]", "id0", list[i]->value.id0, "id1",
+    //                 list[i]->value.id1);
+    //   }
+    // }
   } else {
     uint64_t max_id0_ = max_id0 - min_id0;
     uint32_t max_id1_ = max_id1 - min_id1;
@@ -154,12 +154,12 @@ void radix_sort(common::ObVector<T *> &list, Compare compare, int64_t min_id0, i
       std::sort(list.begin(), list.end(), compare);
 
       // DEBUG
-      if (min_id0 < 0 || min_id1 < 0) {
-        for (int i = 0; i < size; i++) {
-          STORAGE_LOG(INFO, "[OB_SORT_INFO]", "id0", list[i]->value.id0, "id1",
-                      list[i]->value.id1);
-        }
-      }
+      //   if (min_id0 < 0 || min_id1 < 0) {
+      //     for (int i = 0; i < size; i++) {
+      //       STORAGE_LOG(INFO, "[OB_SORT_INFO]", "id0", list[i]->value.id0, "id1",
+      //                   list[i]->value.id1);
+      //     }
+      //   }
     }
     else {
       RadixTraits<T> trait(min_id0,min_id1);
@@ -206,12 +206,12 @@ void radix_sort(common::ObVector<T *> &list, Compare compare, int64_t min_id0, i
       t_list.reset();
 
       // DEBUG
-      if (min_id0 < 0 || min_id1 < 0) {
-        for (int i = 0; i < size; i++) {
-          STORAGE_LOG(INFO, "[OB_SORT_INFO]", "id0", list[i]->value.id0, "id1",
-                      list[i]->value.id1);
-        }
-      }
+    //   if (min_id0 < 0 || min_id1 < 0) {
+    //     for (int i = 0; i < size; i++) {
+    //       STORAGE_LOG(INFO, "[OB_SORT_INFO]", "id0", list[i]->value.id0, "id1",
+    //                   list[i]->value.id1);
+    //     }
+    //   }
     }
   }
 }

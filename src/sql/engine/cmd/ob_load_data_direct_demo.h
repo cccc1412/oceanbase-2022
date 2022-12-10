@@ -12,6 +12,7 @@
 // #include "storage/ob_parallel_external_sort.h"
 #include "storage/tx_storage/ob_ls_handle.h"
 #include "ob_parallel_sort.hpp"
+#include "share/io/ob_io_manager.h"
 
 #include <atomic>
 #include <thread>
@@ -20,8 +21,9 @@ namespace oceanbase {
 namespace sql {
 
 static const int64_t MAX_RECORD_SIZE = (1LL << 12);                         // 4K
-static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 480LL;                 // 576M
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 416LL;                 // 576M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);                        // 2M
+static const int64_t LOAD_BUFFER_SIZE = (2LL << 20);                        // 2M
 static const int64_t SAMPLING_NUM = (1LL << 20);                            // 1M
 static const int64_t BUFFER_NUM = (3LL << 20) + (512LL<<10);                // 4M
 
@@ -34,19 +36,20 @@ public:
   void reuse();
   void reset();
   int create(int64_t capacity);
-  int squash();
-  OB_INLINE char *data() const { return data_; }
-  OB_INLINE char *begin() const { return data_ + begin_pos_; }
-  OB_INLINE char *end() const { return data_ + end_pos_; }
+  // int squash();
+  OB_INLINE const char *data() const { return buf_; }
+  OB_INLINE const char *begin() const { return buf_ + begin_pos_; }
+  OB_INLINE const char *end() const { return buf_ + end_pos_; }
   OB_INLINE bool empty() const { return end_pos_ == begin_pos_; }
   OB_INLINE int64_t get_data_size() const { return end_pos_ - begin_pos_; }
   OB_INLINE int64_t get_remain_size() const { return capacity_ - end_pos_; }
   OB_INLINE void consume(int64_t size) { begin_pos_ += size; }
   OB_INLINE void produce(int64_t size) { end_pos_ += size; }
+  OB_INLINE void assign(int64_t begin_pos,int64_t end_pos, const char* buf) { begin_pos_=begin_pos; end_pos_=end_pos; buf_=buf;}
 
 private:
-  common::ObArenaAllocator allocator_;
-  char *data_;
+  // common::ObArenaAllocator allocator_;
+  const char *buf_;
   int64_t begin_pos_;
   int64_t end_pos_;
   int64_t capacity_;
@@ -56,16 +59,34 @@ class ObLoadSequentialFileReader {
 public:
   ObLoadSequentialFileReader();
   ~ObLoadSequentialFileReader();
-  int open(const ObString &filepath);
+  int open(const ObString &filepath, const int64_t buf_size, int64_t offset,
+           int64_t end);
   int read_next_buffer(ObLoadDataBuffer &buffer);
   int set_offset_end(int64_t offset, int64_t end);
 
 private:
-  char buf_[MAX_RECORD_SIZE];
-  common::ObFileReader file_reader_;
+  static const int64_t MAX_HANDLE_COUNT = 2;
+  char temp_buf_[MAX_RECORD_SIZE];
+
+  // common::ObFileReader file_reader_;
+  bool is_opened_;
+  int64_t expire_timestamp_;
+
+  int prefetch();
+  int wait();
+  int pipeline();
+
+  int fd_;
+  int64_t tenant_id_;
   int64_t offset_;
   int64_t end_;
-  bool is_read_end_;
+  int64_t buf_size_;
+  const char *buf_;
+  int64_t read_size_;
+  bool is_prefetch_end_;
+  int64_t handle_cursor_;
+  common::ObIOHandle file_io_handles_[MAX_HANDLE_COUNT];
+  common::ObArenaAllocator allocator_;
 };
 
 class ObLoadCSVPaser {
@@ -287,7 +308,8 @@ public:
            ObLoadSSTableWriter *sstable_writer = nullptr);
 
 private:
-  int inner_init_process(ObLoadDataStmt &load_stmt);
+  int inner_init_process(ObLoadDataStmt &load_stmt, int64_t offset,
+                         int64_t end);
   int inner_init_load(ObLoadDataStmt &load_stmt);
   int do_process();
   int do_load();

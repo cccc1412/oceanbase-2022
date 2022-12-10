@@ -18,13 +18,13 @@
 namespace oceanbase {
 namespace sql {
 
-static const int64_t MAX_RECORD_SIZE = (1LL << 12);         // 4K
-static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 512LL; // 576M
-static const int64_t FILE_BUFFER_SIZE = (4LL << 20);        // 2M
-static const int64_t SAMPLING_NUM = (1LL << 20);            // 1M
-static const int64_t BUFFER_NUM = (3LL << 20);              // 4M
+static const int64_t MAX_RECORD_SIZE = (1LL << 12);                         // 4K
+static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 400LL;                 // 576M
+static const int64_t FILE_BUFFER_SIZE = (2LL << 20);                        // 2M
+static const int64_t SAMPLING_NUM = (1LL << 20);                            // 1M
+static const int64_t BUFFER_NUM = (3LL << 20) + (512LL<<10);                // 4M
 
-static const uint64_t SLEEP_TIME = 800000;
+static const uint64_t SLEEP_TIME = 400000;
 
 class ObLoadDataBuffer {
 public:

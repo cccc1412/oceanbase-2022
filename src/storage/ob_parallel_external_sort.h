@@ -1467,7 +1467,8 @@ public:
       pop_alloc = allocator_[pop_alloc_id];
     } else if (is_finished) {
       dispatch_data_[pop_alloc_id].reset();
-      pop_alloc->reuse();
+      allocator_[0]->reset();
+      allocator_[1]->reset();
     }
   }
 
@@ -2087,7 +2088,8 @@ int ObExternalSort<T, Compare>::init(const int64_t mem_limit,
     file_buf_size_ = common::lower_align(file_buf_size, macro_block_size);
     buf_mem_limit_ = mem_limit;
     expire_timestamp_ = expire_timestamp;
-    merge_count_per_round_ = buf_mem_limit_ / file_buf_size_ / 2;
+    // merge_count_per_round_ = buf_mem_limit_ / file_buf_size_ / 2;
+    merge_count_per_round_=1024;
     compare_ = compare;
     tenant_id_ = tenant_id;
     curr_round_ = &sort_rounds_[0];

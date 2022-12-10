@@ -114,7 +114,8 @@ template <typename T> ObMacroBufferWriter<T>::~ObMacroBufferWriter() {}
 
 template <typename T> int ObMacroBufferWriter<T>::write_item(const T &item) {
   int ret = common::OB_SUCCESS;
-  if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
+  //if (item.get_serialize_size() + buf_pos_ > buf_cap_) {
+  if (300 + buf_pos_ > buf_cap_) {
     ret = common::OB_EAGAIN;
   } else if (OB_FAIL(item.serialize(buf_, buf_cap_, buf_pos_))) {
     STORAGE_LOG(WARN, "fail to serialize item", K(ret));
@@ -1119,8 +1120,8 @@ int ObExternalSortRound<T, Compare>::build_fragment() {
   } else if (OB_FAIL(writer_.sync())) {
     STORAGE_LOG(WARN, "fail to sync macro file", K(ret));
   } else {
-    STORAGE_LOG(INFO, "build fragment", K(writer_.get_fd()),
-                K(writer_.get_sample_item()));
+    //STORAGE_LOG(INFO, "build fragment", K(writer_.get_fd()),
+      //          K(writer_.get_sample_item()));
     if (OB_FAIL(reader->init(writer_.get_fd(), writer_.get_dir_id(),
                              expire_timestamp_, tenant_id_,
                              writer_.get_sample_item(), file_buf_size_))) {
@@ -1224,7 +1225,7 @@ int ObExternalSortRound<T, Compare>::do_merge(ObExternalSortRound &next_round) {
     STORAGE_LOG(WARN, "ObExternalSortRound has not been inited", K(ret));
   } else {
     int64_t reader_idx = 0;
-    STORAGE_LOG(INFO, "external sort do merge start");
+    //STORAGE_LOG(INFO, "external sort do merge start");
     while (OB_SUCC(ret) && reader_idx < iters_.count()) {
       if (OB_FAIL(do_one_run(reader_idx, next_round))) {
         STORAGE_LOG(WARN, "fail to do one run merge", K(ret));
@@ -1238,7 +1239,7 @@ int ObExternalSortRound<T, Compare>::do_merge(ObExternalSortRound &next_round) {
         STORAGE_LOG(WARN, "fail to finsh next round", K(ret));
       }
     }
-    STORAGE_LOG(INFO, "external sort do merge end");
+    //STORAGE_LOG(INFO, "external sort do merge end");
   }
   return ret;
 }
@@ -1742,7 +1743,7 @@ int ObMemorySortRound<T, Compare>::build_fragment() {
     } else {
       const int64_t sort_fragment_time =
           common::ObTimeUtility::current_time() - start;
-      STORAGE_LOG(INFO, "ObMemorySortRound", K(sort_fragment_time));
+      //STORAGE_LOG(INFO, "ObMemorySortRound", K(sort_fragment_time));
     }
 
     start = common::ObTimeUtility::current_time();
@@ -1758,7 +1759,7 @@ int ObMemorySortRound<T, Compare>::build_fragment() {
       } else {
         const int64_t write_fragment_time =
             common::ObTimeUtility::current_time() - start;
-        STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
+        //STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
         item_list_.reset();
         allocator_.reuse();
       }
@@ -1781,7 +1782,7 @@ int ObMemorySortRound<T, Compare>::build_fragment_reuse() {
     } else {
       const int64_t sort_fragment_time =
           common::ObTimeUtility::current_time() - start;
-      STORAGE_LOG(INFO, "ObMemorySortRound", K(sort_fragment_time));
+      //STORAGE_LOG(INFO, "ObMemorySortRound", K(sort_fragment_time));
     }
 
     start = common::ObTimeUtility::current_time();
@@ -1797,7 +1798,7 @@ int ObMemorySortRound<T, Compare>::build_fragment_reuse() {
       } else {
         const int64_t write_fragment_time =
             common::ObTimeUtility::current_time() - start;
-        STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
+        //STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
         item_list_.reset();
         dispatch_queue_->wait_switch_pop();
       }
@@ -1826,7 +1827,7 @@ int ObMemorySortRound<T, Compare>::build_fragment_nosort() {
       } else {
         const int64_t write_fragment_time =
             common::ObTimeUtility::current_time() - start;
-        STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
+        //STORAGE_LOG(INFO, "ObMemorySortRound", K(write_fragment_time));
         item_list_.reset();
         allocator_.reuse();
       }
@@ -2120,7 +2121,7 @@ int ObExternalSort<T, Compare>::do_sort(const bool final_merge) {
     STORAGE_LOG(WARN, "fail to finish memory sort round", K(ret));
   } else if (memory_sort_round_.has_data() &&
              memory_sort_round_.is_in_memory()) {
-    STORAGE_LOG(INFO, "all data sorted in memory");
+    //STORAGE_LOG(INFO, "all data sorted in memory");
     is_empty_ = false;
   } else if (0 == curr_round_->get_fragment_count()) {
     is_empty_ = true;
@@ -2135,7 +2136,7 @@ int ObExternalSort<T, Compare>::do_sort(const bool final_merge) {
     while (OB_SUCC(ret) &&
            curr_round_->get_fragment_count() > final_round_limit) {
       const int64_t start_time = common::ObTimeUtility::current_time();
-      STORAGE_LOG(INFO, "do sort start round", K(round_id));
+      //STORAGE_LOG(INFO, "do sort start round", K(round_id));
       if (OB_FAIL(next_round_->init(merge_count_per_round_, file_buf_size_,
                                     expire_timestamp_, tenant_id_, compare_))) {
         STORAGE_LOG(WARN, "fail to init next sort round", K(ret));
@@ -2148,7 +2149,7 @@ int ObExternalSort<T, Compare>::do_sort(const bool final_merge) {
         std::swap(curr_round_, next_round_);
         const int64_t round_cost_time =
             common::ObTimeUtility::current_time() - start_time;
-        STORAGE_LOG(INFO, "do sort end round", K(round_id), K(round_cost_time));
+        //STORAGE_LOG(INFO, "do sort end round", K(round_id), K(round_cost_time));
         ++round_id;
       }
     }
@@ -2183,7 +2184,7 @@ int ObExternalSort<T, Compare>::do_sort_reuse(const bool final_merge) {
     while (OB_SUCC(ret) &&
            curr_round_->get_fragment_count() > final_round_limit) {
       const int64_t start_time = common::ObTimeUtility::current_time();
-      STORAGE_LOG(INFO, "do sort start round", K(round_id));
+      //STORAGE_LOG(INFO, "do sort start round", K(round_id));
       if (OB_FAIL(next_round_->init(merge_count_per_round_, file_buf_size_,
                                     expire_timestamp_, tenant_id_, compare_))) {
         STORAGE_LOG(WARN, "fail to init next sort round", K(ret));
@@ -2196,7 +2197,7 @@ int ObExternalSort<T, Compare>::do_sort_reuse(const bool final_merge) {
         std::swap(curr_round_, next_round_);
         const int64_t round_cost_time =
             common::ObTimeUtility::current_time() - start_time;
-        STORAGE_LOG(INFO, "do sort end round", K(round_id), K(round_cost_time));
+        //STORAGE_LOG(INFO, "do sort end round", K(round_id), K(round_cost_time));
         ++round_id;
       }
     }
@@ -2246,7 +2247,7 @@ void ObExternalSort<T, Compare>::clean_up() {
   curr_round_ = NULL;
   next_round_ = NULL;
   is_empty_ = true;
-  STORAGE_LOG(INFO, "do external sort clean up");
+  //STORAGE_LOG(INFO, "do external sort clean up");
   for (int64_t i = 0; i < EXTERNAL_SORT_ROUND_CNT; ++i) {
     // ignore ret
     if (sort_rounds_[i].is_inited() &&

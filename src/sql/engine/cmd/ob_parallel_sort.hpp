@@ -203,10 +203,10 @@ void radix_sort(common::ObVector<T *> &list, Compare compare, int64_t min_id0, i
         }
       }
       //list.clear();
-      //list.assign(*current_list);
-      for(int i = 0; i < size; i++) {
-        list.at(i) = current_list->at(i);
-      }
+      list.assignv2(*current_list);
+      //for(int i = 0; i < size; i++) {
+      //  list.at(i) = current_list->at(i);
+      //}
       t_list.reset();
 
       // DEBUG

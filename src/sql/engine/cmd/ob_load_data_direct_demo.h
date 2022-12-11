@@ -23,7 +23,7 @@ static const int64_t MAX_RECORD_SIZE = (1LL << 12);                         // 4
 static const int64_t MEM_BUFFER_SIZE = (1LL << 20) * 416LL;                 // 576M
 static const int64_t FILE_BUFFER_SIZE = (2LL << 20);                        // 2M
 static const int64_t LOAD_BUFFER_SIZE = (2LL << 20);                        // 2M
-static const int64_t SAMPLING_NUM = (1LL << 20);                            // 1M
+static const int64_t SAMPLING_NUM = (2LL << 20);                            // 1M
 static const int64_t BUFFER_NUM = (4LL << 20);                              // 4M
 
 static const uint64_t SLEEP_TIME = 200000;

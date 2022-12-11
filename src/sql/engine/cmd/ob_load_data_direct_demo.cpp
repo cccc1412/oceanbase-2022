@@ -1387,7 +1387,7 @@ int ObLoadDataDirectDemo::inner_init_process(ObLoadDataStmt &load_stmt) {
     LOG_WARN("fail to open file", KR(ret), K(load_args.full_file_path_));
   }
   // init buffer_
-  else if (OB_FAIL(buffer_.create(FILE_BUFFER_SIZE))) {
+  else if (OB_FAIL(buffer_.create(LOAD_BUFFER_SIZE))) {
     LOG_WARN("fail to create buffer", KR(ret));
   }
   // init row_caster_

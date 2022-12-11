@@ -115,7 +115,7 @@ int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
   if (-1==(read_size=pread(fd_, temp_buf_, MAX_RECORD_SIZE, end))) {
     LOG_WARN("fail to do pread", KR(ret));
     goto out;
-  } else {
+  } else if(read_size>0) {
     int64_t i = 0;
     while (i < read_size && temp_buf_[i] != '\n') {
       i++;
@@ -130,7 +130,7 @@ int ObLoadSequentialFileReader::set_offset_end(int64_t offset, int64_t end) {
     if (-1 == (read_size=pread(fd_, temp_buf_, MAX_RECORD_SIZE, offset))) {
       LOG_WARN("fail to do pread", KR(ret));
       goto out;
-    } else {
+    } else if (read_size > 0) {
       int64_t i = 0;
       while (i < read_size && temp_buf_[i] != '\n') {
         i++;
@@ -175,7 +175,7 @@ int ObLoadSequentialFileReader::prefetch() {
       io_info.tenant_id_ = tenant_id_;
       io_info.offset_ = offset_;
       io_info.size_ = std::min(buf_size_, end_ - offset_);
-      io_info.buf_ = buf_;
+      // io_info.buf_ = buf_;
       io_info.flag_.set_mode(ObIOMode::READ);
       io_info.flag_.set_category(ObIOCategory::USER_IO);
       io_info.flag_.set_wait_event(ObWaitEventIds::DB_FILE_DATA_READ);
@@ -238,6 +238,20 @@ int ObLoadSequentialFileReader::read_next_buffer(ObLoadDataBuffer &buffer) {
     }
   } else {
     buffer.assign(0, read_size_, buf_);
+  }
+  return ret;
+}
+
+int ObLoadSequentialFileReader::close() {
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(!is_opened_)) {
+    ret = OB_NOT_INIT;
+    LOG_WARN("ObLoadSequentialFileReader has not been opened", KR(ret));
+  } else {
+    for (int64_t i = 0; i < MAX_HANDLE_COUNT; ++i) {
+      file_io_handles_[i].reset();
+    }
+    ::close(fd_);
   }
   return ret;
 }
@@ -1568,6 +1582,8 @@ int ObLoadDataDirectDemo::do_process() {
   if (OB_SUCC(ret)) {
     if (OB_FAIL(dispatcher_->close(index_))) {
       LOG_WARN("fail to close dispatcher", KR(ret));
+    } else {
+      file_reader_.close();
     }
   }
   return ret;

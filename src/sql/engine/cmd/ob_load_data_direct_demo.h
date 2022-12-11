@@ -61,6 +61,7 @@ public:
   ~ObLoadSequentialFileReader();
   int open(const ObString &filepath, const int64_t buf_size, int64_t offset,
            int64_t end);
+  int close();
   int read_next_buffer(ObLoadDataBuffer &buffer);
   int set_offset_end(int64_t offset, int64_t end);
 

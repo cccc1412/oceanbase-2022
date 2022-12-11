@@ -82,6 +82,16 @@ int ObVector<T, Allocator>::assign(const ObVector<T, Allocator> &other)
 }
 
 template <typename T, typename Allocator>
+int ObVector<T, Allocator>::assignv2(const ObVector<T, Allocator> &other)
+{
+  int ret = OB_SUCCESS;
+  if (this != &other) {
+    copy(mem_begin_, other.begin(), other.end());
+  }
+  return ret;
+}
+
+template <typename T, typename Allocator>
 ObVector<T, Allocator> &ObVector<T, Allocator>::operator=(const ObVector<T, Allocator> &other)
 {
   int ret = assign(other);

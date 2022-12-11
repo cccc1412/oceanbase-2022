@@ -93,6 +93,7 @@ public:
                     const lib::ObLabel &label = ObModIds::OB_MOD_DO_NOT_USE_ME);
   virtual ~ObVector();
   int assign(const ObVector &other);
+  int assignv2(const ObVector &other);
   ObVector<T, Allocator> &operator=(const ObVector<T, Allocator> &other);
   explicit ObVector(const ObVector<T, Allocator> &other);
 public:

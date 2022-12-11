@@ -22,8 +22,10 @@ namespace sql
 {
 class ObLoadDataStmt;
 class ObLoadDataExecutor {
-  static const int64_t PROCESS_THREAD_NUM = 5;
+
+  static const int64_t PROCESS_THREAD_NUM = 4;
   static const int64_t LOAD_THREAD_NUM = 11;
+
 public:
   ObLoadDataExecutor() {}
   virtual ~ObLoadDataExecutor() {}
